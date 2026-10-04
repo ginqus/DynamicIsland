@@ -37,16 +37,41 @@ public partial class MainWindow : Window
         [View.TimerBig] = new(330, 92, 40),
         [View.TimerSet] = new(300, 190, 38),
         [View.Menu] = new(300, 248, 34),
-        [View.Settings] = new(320, 374, 34),
-        [View.Look] = new(320, 208, 34),
+[View.Settings] = new(320, 374, 34),
+        [View.Look] = new(320, 248, 34),
         [View.Shelf] = new(380, 136, 34),
     };
+
+    /// <summary>
+    /// Where a view of the music leaves room for the cover and the bars: the cover's corner from the pill's left end and
+    /// its top, and its size; the bars' end from the pill's right end, their middle from its top, their size and how
+    /// far the row of them is opened out.
+    /// </summary>
+    readonly record struct Spot(double ArtX, double ArtY, double Art, double EqEnd, double EqMid, double EqW, double EqH, double EqOpen);
+
+    static readonly Dictionary<View, Spot> Spots = new()
+    {
+        [View.Media] = new(7, 6, 22, 13, 17, 21, 16, 0),
+        [View.Toast] = new(12, 12, 44, 20, 34, 23, 20, 0),
+        [View.MediaBig] = new(20, 20, 64, 22, 52, 38, 26, 1),
+    };
+
+    /// <summary>The pages the menu leads to: going to one is a step deeper, coming back to the menu a step out.</summary>
+    static readonly View[] Pages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.Shelf];
 
     const double HostWidth = 620;
     static readonly int[] Scales = [85, 100, 115, 130]; // percent: the sizes to pick from
     static readonly int[] Gaps = [0, 4, 8, 12, 16, 24]; // px between the top of the screen and the island
+    static readonly string[] Pulses = ["Выкл.", "Слабый", "Средний", "Сильный"]; // how much the edge makes of the bass...
+    static readonly double[] PulseShare = [0, 0.4, 0.7, 1]; // ...and how brightly it lights up at each
+    const double PulseFrom = 0.5; // height of the lowest bar past which the edge lights up: where it sits at its usual level
+    const double PulseAttack = 0.02, PulseRelease = 0.22; // seconds: the light comes with the beat and lingers after it
+    const double ArtFull = 64, ArtRadius = 16; // the cover as it is laid out: the size the player shows it at
+    const double PageShift = 56; // px a page of the menu comes in from, or goes out by
+    const double RowLag = 28; // ms each row of it starts after the one above
     const double SourcePause = 0.25; // seconds between two turns to another app: a wheel sends its notches in bursts
     const double BubbleGap = 7; // between the split-off bubble and the pill
+    const double BubbleTuck = 1.6; // px deeper into the pill the bubble is put away, for each px its corners are rounder than the bubble's ends
     const double CarryTimer = 78, CarryShelf = 54; // width of the bubble carrying either (the shelf's at the least: more digits widen it)...
     const double CarryBoth = 11; // ...and how much narrower it is than the two together, when it carries both
     const double ShelfEnd = 13, ShelfEndTimed = 10; // the count's room to the bubble's right end, alone and after the timer, whose own ends are narrower
@@ -59,6 +84,8 @@ public partial class MainWindow : Window
     const int HeadsetEvery = 300; // ticks between looks at the headphones' charge: it moves slowly
     const int HeadsetLow = 20, HeadsetCritical = 10; // percent: passing each on the way down is worth a warning
     const int TimerLast = 10; // seconds: the end of a countdown turns red and beats
+    const double BellHangs = -8; // px from the middle of the bell up to where it hangs, and swings from
+    const double NoticeWash = 0.2; // how much of the icon's colour the square behind it takes
     const double SkipMemory = 3; // seconds a press of "previous" stays the reason for the cover that comes next
     const double VolumeTrack = 162;
     const double VolumePush = 7; // how far the bar gives when the volume is asked past an end of it
@@ -87,6 +114,9 @@ public partial class MainWindow : Window
     static readonly TimeSpan AwayFor = TimeSpan.FromSeconds(5); // a middle click sends the island off screen for this long
     static readonly TimeSpan PushFor = TimeSpan.FromMilliseconds(140); // the bar stays stretched this long after the last push
     static readonly TimeSpan DropLinger = TimeSpan.FromMilliseconds(150);
+    static readonly TimeSpan NoticeWait = TimeSpan.FromMilliseconds(160); // for a notice to come into sight before its icon makes its entrance
+    static readonly TimeSpan RingRound = TimeSpan.FromSeconds(1.5); // a finished timer rings in rounds this long...
+    static readonly TimeSpan RingSwing = TimeSpan.FromSeconds(0.8); // ...the bell swinging through the first part of each
     static readonly CultureInfo Ru = new("ru-RU");
 
     readonly Dictionary<View, FrameworkElement> _views;
@@ -99,7 +129,10 @@ public partial class MainWindow : Window
     readonly Spring _shelfScroll = new(0); // px the tiles are moved left by the wheel
     readonly Spring _push = new(0); // px the volume bar is stretched past its end
     readonly Spring _size = new(Settings.Scale / 100.0), _gap = new(Settings.Gap); // the looks picked in the menu
-    readonly RectangleGeometry _clip = new();
+    // where the cover and the bars are on their way between the views of the music, a spring for each number of a Spot
+    readonly Spring _artX = new(0), _artY = new(0), _art = new(ArtFull);
+    readonly Spring _eqEnd = new(0), _eqMid = new(0), _eqW = new(1), _eqH = new(1), _eqOpen = new(0);
+    readonly Spring[] _spot;
     readonly SolidColorBrush _accent = new(Colors.White);
     readonly SolidColorBrush _timerTint; // everything a countdown shows is drawn with it: orange, red at the end
     readonly ScaleTransform _beat = new(1, 1), _beatBig = new(1, 1); // the rings and the big digits, on each of the last seconds
@@ -113,6 +146,10 @@ public partial class MainWindow : Window
     readonly Shelf _shelf;
     readonly Dictionary<Shelf.Item, ShelfTile> _tiles = new();
     readonly BlurEffect _motion = new() { Radius = 0, RenderingBias = RenderingBias.Performance }; // over the content while the island changes shape
+    // the see-through window redraws whatever the bars next to the lyric line touch, and each time it draws the text
+    // anew it lands a fraction of a pixel elsewhere: the line crept up and fell back, its last letters a hair lower.
+    // Drawn once into a bitmap that sits on whole pixels, it stays put
+    readonly BitmapCache _lyricCache = new() { SnapsToDevicePixels = true };
     readonly Alarm _alarm = new();
     readonly Stopwatch _time = Stopwatch.StartNew();
     readonly DispatcherTimer _tick, _transientTimer, _collapseTimer, _awayTimer, _pushTimer, _dropTimer;
@@ -139,6 +176,9 @@ public partial class MainWindow : Window
     int _minutes = 25, _timerShown = -1;
     int _shelfShown; // files the counters read
     double _lastFrame, _eqFrame, _seekFrame;
+    double _pulse; // how far the edge is lit by the bass
+    Rect _cut = Rect.Empty; // the pill the views were last cut to...
+    double _cutRadius; // ...and its corners
     double _scrub, _scrubUntil; // fraction under the pointer; it stays on the bar until the player reports the jump
     (int At, int Total) _seekLabel = (-1, -1);
     int _ticks;
@@ -199,19 +239,22 @@ public partial class MainWindow : Window
         foreach (FrameworkElement v in _views.Values)
         {
             v.RenderTransformOrigin = new Point(0.5, 0.5);
-            // its own fade in and out, then the ride on the shape of the pill
-            v.RenderTransform = new TransformGroup { Children = { new ScaleTransform(1, 1), new ScaleTransform(1, 1), new TranslateTransform() } };
+            v.RenderTransform = Moves();
             v.Visibility = Visibility.Collapsed;
             v.Opacity = 0;
         }
         IdleView.Visibility = Visibility.Visible;
         IdleView.Opacity = 1;
+        // the cover and the bars come and go the way a view does, about the middle of the pill
+        Shared.RenderTransform = Moves();
+        ArtSpot.Clip = Squircle.Of(new Rect(0, 0, ArtFull, ArtFull), ArtRadius);
+        _spot = [_artX, _artY, _art, _eqEnd, _eqMid, _eqW, _eqH, _eqOpen];
 
-        Host.Clip = _clip;
-        EqSmall.Fill = EqToast.Fill = EqBig.Fill = _accent;
+        LyricBox.CacheMode = _lyricCache;
+        Eq.Fill = _accent;
 
-        _timerTint = new SolidColorBrush(((SolidColorBrush)FindResource("Orange")).Color);
-        TimerRing.Stroke = BubbleRing.Stroke = _timerTint;
+        _timerTint = new SolidColorBrush(Tone("Orange"));
+        TimerRing.Stroke = BubbleRing.Stroke = BigRing.Stroke = _timerTint;
         TimerText.Foreground = BubbleText.Foreground = BigTimer.Foreground = BigTimerLabel.Foreground = MenuTimer.Foreground = _timerTint;
         TimerDisc.Fill = _timerTint;
         TimerPauseIcon.Fill = TimerPauseIcon.Stroke = TimerPlayIcon.Fill = TimerPlayIcon.Stroke = _timerTint;
@@ -219,7 +262,7 @@ public partial class MainWindow : Window
         TimerRing.RenderTransform = BubbleRing.RenderTransform = _beat;
         // the digits are set against the right edge, so that is where they swell from
         BigTimer.RenderTransformOrigin = new Point(1, 0.5);
-        BigTimer.RenderTransform = _beatBig;
+        BigTimer.RenderTransform = BigRing.RenderTransform = _beatBig;
         foreach (FrameworkElement icon in new FrameworkElement[] { PlayIcon, PauseIcon, TimerPlayIcon, TimerPauseIcon })
         {
             icon.RenderTransformOrigin = new Point(0.5, 0.5);
@@ -232,7 +275,6 @@ public partial class MainWindow : Window
         _r.Tune(300, 30);
         _seekX.Tune(170, 26);
         _seekH.Tune(420, 26);
-        _split.Tune(140, 17); // unhurried: the neck between the two has to be seen stretching and snapping
         _bubbleScale.Tune(320, 20);
         _push.Tune(420, 18); // loose enough to wobble once it is let go
         _carryTimer.Tune(260, 24);
@@ -322,6 +364,13 @@ public partial class MainWindow : Window
         if (Native.RegisterShellHookWindow(_hwnd)) HwndSource.FromHwnd(_hwnd).AddHook(OnShellMessage);
     }
 
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        // the lyric line's bitmap goes with the screen's pixels
+        ApplyShape();
+    }
+
     // the volume and track keys pass through the shell on their way to the system: the volume itself is polled,
     // but a key pressed at the end of its range changes nothing there, and nothing else says which way a track was skipped
     IntPtr OnShellMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -397,7 +446,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        Dims from = SizeOf(_current);
+        View was = _current;
+        Dims from = SizeOf(was);
         _current = target;
         // how tall the player opens depends on whether it has lyrics to show
         if (target == View.MediaBig) UpdatePlayerLyric(true);
@@ -407,9 +457,12 @@ public partial class MainWindow : Window
         // overshoot a little when growing, settle firmly when shrinking
         _w.Tune(growing ? 300 : 340, growing ? 22 : 30);
         _h.Tune(growing ? 300 : 340, growing ? 22 : 30);
+        // the cover and the bars go with the shape
+        foreach (Spring part in _spot) part.Tune(_w.Stiffness, _w.Damping);
 
         _morph = true;
-        Swap(_views[target]);
+        Swap(_views[target], Turn(was, target));
+        Share(was, target, to);
         SetTargets();
 
         SyncEq();
@@ -417,6 +470,42 @@ public partial class MainWindow : Window
         if (target == View.MediaBig) StartSeek();
         if (target == View.Media) UpdateLyric(true);
     }
+
+    /// <summary>
+    /// Takes the cover and the bars from one view to the next. Between two views of the music they travel; into one
+    /// from anything else they come up in their places with it, and out of one they fade away with it.
+    /// </summary>
+    void Share(View from, View to, Dims size)
+    {
+        bool had = Spots.ContainsKey(from), has = Spots.TryGetValue(to, out Spot spot);
+        if (has)
+        {
+            // out of sight, there is nowhere for them to travel from
+            bool fresh = Shared.Visibility != Visibility.Visible || Shared.Opacity < 0.05;
+            double[] places = [spot.ArtX, spot.ArtY, spot.Art, spot.EqEnd, spot.EqMid, spot.EqW, spot.EqH, spot.EqOpen];
+            for (int i = 0; i < _spot.Length; i++)
+            {
+                _spot[i].Target = places[i];
+                if (!fresh) continue;
+                _spot[i].Value = places[i];
+                _spot[i].Velocity = 0;
+            }
+        }
+        // in the player the cover is a thing to click
+        ArtSpot.Cursor = to == View.MediaBig ? Cursors.Hand : null;
+        if (has == had) return;
+
+        // they swell and shrink about the middle of the view they belong to, as it does itself
+        ScaleTransform scale = Fade(Shared);
+        scale.CenterX = HostWidth / 2;
+        scale.CenterY = (has ? size : SizeOf(from)).H / 2;
+        if (has) FadeIn(Shared);
+        else FadeOut(Shared);
+    }
+
+    /// <summary>Which way a change of view goes through the menu: 1 into one of its pages, -1 back out to it, 0 when it is neither.</summary>
+    static int Turn(View from, View to) =>
+        from == View.Menu && Pages.Contains(to) ? 1 : to == View.Menu && Pages.Contains(from) ? -1 : 0;
 
     // the light edge takes the colour of the cover for as long as the island is about its music
     void SyncRim()
@@ -441,7 +530,7 @@ public partial class MainWindow : Window
         PlayerLyricWait.Tint(palette, time);
     }
 
-    bool EqVisible => _current is View.Media or View.Toast or View.MediaBig;
+    bool EqVisible => Spots.ContainsKey(_current);
 
     // the bars only cost frames (and audio capture) while they are on screen; once paused they settle and stop
     void SyncEq()
@@ -485,6 +574,10 @@ public partial class MainWindow : Window
         bool timer = _timer.Active && _current != View.Timer, shelf = _shelf.Items.Count > 0;
         bool split = compact && (timer || shelf);
         _split.Target = split ? 1 : 0;
+        // beside the pill it is unhurried: the neck between the two has to be seen stretching and snapping. A pill
+        // that opens up swallows it, at the pace it grows itself
+        if (compact) _split.Tune(140, 17);
+        else _split.Tune(300, 30);
         if (split)
         {
             _carryTimer.Target = timer ? 1 : 0;
@@ -545,6 +638,7 @@ public partial class MainWindow : Window
         moving |= _shelfWide.Advance(dt);
         moving |= _shelfScroll.Advance(dt);
         moving |= _push.Advance(dt);
+        foreach (Spring part in _spot) moving |= part.Advance(dt);
         ApplyShape();
 
         if (!moving)
@@ -560,9 +654,9 @@ public partial class MainWindow : Window
         double w = Math.Max(_w.Value, 24), h = Math.Max(_h.Value, 24);
         double r = Math.Clamp(_r.Value, 0, Math.Min(w, h) / 2);
 
-        Pill.Width = Shadow.Width = w;
-        Pill.Height = Shadow.Height = h;
-        Pill.CornerRadius = Shadow.CornerRadius = new CornerRadius(r);
+        Pill.Width = w;
+        Pill.Height = h;
+        Pill.CornerRadius = new CornerRadius(r);
         var pill = new Rect((HostWidth - w) / 2, 0, w, h);
         Shadow.Opacity = Math.Clamp((h - 40) / 50, 0, 1);
 
@@ -585,8 +679,13 @@ public partial class MainWindow : Window
         ShelfEdgeLeft.Color = Edge(scrolled);
         ShelfEdgeRight.Color = Edge(ahead);
 
-        _clip.Rect = pill;
-        _clip.RadiusX = _clip.RadiusY = r;
+        // what the island shows is cut to the outline of its body, and its shadow is cast by the same
+        if (pill != _cut || r != _cutRadius)
+        {
+            _cut = pill;
+            _cutRadius = r;
+            Host.Clip = Shared.Clip = Shadow.Data = Squircle.Of(pill, r);
+        }
 
         // stretched past its end, the volume bar gets longer and thinner, like rubber
         double push = Math.Max(_push.Value, -VolumePush);
@@ -599,6 +698,22 @@ public partial class MainWindow : Window
         double size = Math.Max(_size.Value, 0.01);
         RootSize.ScaleX = RootSize.ScaleY = size;
         RootMove.Y = _offset.Value + _gap.Value / size;
+        // the lyric line's bitmap is drawn at the size it is shown, pixel for pixel, or it would be blurred
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        double sharp = size * scale * dpi;
+        if (Math.Abs(_lyricCache.RenderAtScale - sharp) > 0.001) _lyricCache.RenderAtScale = sharp;
+
+        // the cover keeps to the pill's left end and the bars to its right one, wherever between two views they are.
+        // The cover stands on whole pixels, as it would laid out in a view
+        ArtSize.ScaleX = ArtSize.ScaleY = Math.Max(_art.Value, 1) / ArtFull;
+        ArtMove.X = Math.Round((pill.Left + _artX.Value) * dpi) / dpi;
+        ArtMove.Y = Math.Round(_artY.Value * dpi) / dpi;
+        double eqW = Math.Max(_eqW.Value, 1), eqH = Math.Max(_eqH.Value, 1);
+        Eq.Width = eqW;
+        Eq.Height = eqH;
+        Eq.Open = _eqOpen.Value;
+        EqMove.X = pill.Right - _eqEnd.Value - eqW;
+        EqMove.Y = _eqMid.Value - eqH / 2;
 
         // the bubble rides the pill's right end: inside it, then out past the gap, its content fading in as it comes free.
         // It follows that end as the pill swells under the pointer, but keeps its own size. It is as wide as what it
@@ -613,14 +728,17 @@ public partial class MainWindow : Window
         BubbleShelf.Opacity = Math.Clamp(shelf * 2 - 1, 0, 1);
         // beside the timer the count keeps to the timer's ends, so the two sit as one row in the middle
         BubbleShelf.Margin = new Thickness(0, 0, ShelfEnd + (ShelfEndTimed - ShelfEnd) * Math.Clamp(timer, 0, 1), 0);
-        BubbleMove.X = (w * scale - wide) / 2 + (BubbleGap + wide) * split;
+        // an open pill has corners rounder than the bubble's ends: tucked just inside its right end, the bubble would
+        // stick out of the top one, to be gone all at once when it is put away. It goes that much deeper instead
+        double tuck = Math.Max(r - Bubble.Height / 2, 0) * BubbleTuck * (1 - Math.Clamp(split, 0, 1)) * scale;
+        BubbleMove.X = (w * scale - wide) / 2 + (BubbleGap + wide) * split - tuck;
         BubbleScale.ScaleX = BubbleScale.ScaleY = bubble;
         BubbleBody.Opacity = Math.Clamp(split * 4 - 3, 0, 1);
         // until then the pill's end is the pill's to click
         Bubble.IsHitTestVisible = split > 0.75;
 
         // the body is drawn in the pill's own scale, so the bubble is measured in it too
-        double past = ((BubbleGap + wide) * split - wide) / scale; // of its left end beyond the pill's right one
+        double past = ((BubbleGap + wide) * split - wide - tuck) / scale; // of its left end beyond the pill's right one
         Body.Shape(pill, r, apart
             ? new Rect(pill.Right + past, 0, wide * bubble / scale, Bubble.Height * bubble / scale)
             : Rect.Empty);
@@ -653,14 +771,108 @@ public partial class MainWindow : Window
         Host.Effect = null;
     }
 
+    // what moves a view: its own fade in and out, then the ride on the shape of the pill, the sideways slide of a
+    // page of the menu along with it
+    static TransformGroup Moves() => new() { Children = { new ScaleTransform(1, 1), new ScaleTransform(1, 1), new TranslateTransform() } };
+
     /// <summary>The view's own scale, the one it fades in and out with.</summary>
     static ScaleTransform Fade(FrameworkElement v) => (ScaleTransform)((TransformGroup)v.RenderTransform).Children[0];
 
-    void Swap(FrameworkElement next)
+    /// <summary>What a page of the menu slides sideways by.</summary>
+    static TranslateTransform Slide(FrameworkElement v) => (TranslateTransform)((TransformGroup)v.RenderTransform).Children[2];
+
+    /// <summary>Whether it belongs to what the island is showing now.</summary>
+    bool Shown(FrameworkElement v) => v == Shared ? Spots.ContainsKey(_current) : _views[_current] == v;
+
+    /// <param name="turn">A step through the menu: 1 into one of its pages, -1 back out of it. The views pass sideways then,
+    /// instead of one dissolving into the other.</param>
+    void Swap(FrameworkElement next, int turn = 0)
     {
         foreach (FrameworkElement v in _views.Values)
-            if (v != next && v.Visibility == Visibility.Visible) FadeOut(v);
-        FadeIn(next);
+        {
+            if (v == next || v.Visibility != Visibility.Visible) continue;
+            if (turn == 0) FadeOut(v);
+            else SlideOut(v, turn);
+        }
+        if (turn == 0) FadeIn(next);
+        else SlideIn(next, turn);
+    }
+
+    /// <summary>The page being left goes the way the menu moves: to the left as it goes deeper, to the right on the way back.</summary>
+    void SlideOut(FrameworkElement v, int turn)
+    {
+        v.IsHitTestVisible = false;
+        v.Effect = null;
+        // it is well on its way before it has faded: the eye catches which way it went
+        Slide(v).BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(-turn * PageShift, Ms(190))
+        {
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseIn }
+        });
+        var fade = new DoubleAnimation(0, Ms(150));
+        fade.Completed += (_, _) =>
+        {
+            if (!Shown(v)) v.Visibility = Visibility.Collapsed;
+        };
+        v.BeginAnimation(OpacityProperty, fade);
+    }
+
+    /// <summary>...and the one it gives way to comes in from the other side, its rows one after another, the top one first.</summary>
+    void SlideIn(FrameworkElement v, int turn)
+    {
+        v.Visibility = Visibility.Visible;
+        v.IsHitTestVisible = true;
+        v.Effect = null;
+        ScaleTransform scale = Fade(v);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+
+        var ease = new QuarticEase { EasingMode = EasingMode.EaseOut };
+        TimeSpan wait = TimeSpan.FromMilliseconds(50), run = TimeSpan.FromMilliseconds(420), show = TimeSpan.FromMilliseconds(200);
+        // a page that is all one piece comes in as one
+        if (Rows(v) is not { } rows)
+        {
+            Slide(v).BeginAnimation(TranslateTransform.XProperty, Late(turn * PageShift, 0, wait, run, ease));
+            v.BeginAnimation(OpacityProperty, Late(0, 1, wait, show));
+            return;
+        }
+
+        Slide(v).BeginAnimation(TranslateTransform.XProperty, null);
+        v.BeginAnimation(OpacityProperty, new DoubleAnimation(1, Ms(100)));
+        foreach (UIElement row in rows)
+        {
+            if (row.RenderTransform is not TranslateTransform move) row.RenderTransform = move = new TranslateTransform();
+            move.BeginAnimation(TranslateTransform.XProperty, Late(turn * PageShift, 0, wait, run, ease));
+            row.BeginAnimation(OpacityProperty, Late(0, 1, wait, show));
+            wait += TimeSpan.FromMilliseconds(RowLag);
+        }
+    }
+
+    /// <summary>The rows of a page of the menu, top to bottom; null for a page that is not a list of them.</summary>
+    static UIElementCollection? Rows(FrameworkElement v) => v is Grid { Children: [StackPanel list] } ? list.Children : null;
+
+    /// <summary>
+    /// An animation that holds its first value until its turn comes. Keyframes, not BeginTime: while a delayed
+    /// animation waits, what it moves stays as it was left.
+    /// </summary>
+    static DoubleAnimationUsingKeyFrames Late(double from, double to, TimeSpan wait, TimeSpan run, IEasingFunction? ease = null)
+    {
+        var late = new DoubleAnimationUsingKeyFrames { Duration = wait + run };
+        late.KeyFrames.Add(new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        late.KeyFrames.Add(new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(wait)));
+        late.KeyFrames.Add(new EasingDoubleKeyFrame(to, KeyTime.FromTimeSpan(wait + run), ease));
+        return late;
+    }
+
+    /// <summary>A swing from side to side through the given values, one after another over the run, after a wait at rest.</summary>
+    static DoubleAnimationUsingKeyFrames Sway(TimeSpan wait, TimeSpan run, params double[] sides)
+    {
+        var sway = new DoubleAnimationUsingKeyFrames { Duration = wait + run };
+        sway.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        sway.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(wait)));
+        for (int i = 0; i < sides.Length; i++)
+            sway.KeyFrames.Add(new EasingDoubleKeyFrame(sides[i], KeyTime.FromTimeSpan(wait + run * ((i + 1.0) / sides.Length)),
+                new SineEase { EasingMode = EasingMode.EaseInOut }));
+        return sway;
     }
 
     void FadeOut(FrameworkElement v)
@@ -678,7 +890,7 @@ public partial class MainWindow : Window
         var fade = new DoubleAnimation(0, Ms(140));
         fade.Completed += (_, _) =>
         {
-            if (_views[_current] == v) return;
+            if (Shown(v)) return;
             v.Visibility = Visibility.Collapsed;
             v.Effect = null;
         };
@@ -690,6 +902,8 @@ public partial class MainWindow : Window
         bool fresh = v.Visibility != Visibility.Visible || v.Opacity < 0.05;
         v.Visibility = Visibility.Visible;
         v.IsHitTestVisible = true;
+        // wherever a turn of the menu's pages had left it
+        Slide(v).BeginAnimation(TranslateTransform.XProperty, null);
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         TimeSpan delay = TimeSpan.FromMilliseconds(70);
 
@@ -759,13 +973,17 @@ public partial class MainWindow : Window
             level = peak < 0 ? 0.4 : peak;
         }
 
-        bool moving = EqSmall.Tick(bands, level, playing, now, dt);
-        moving |= EqToast.Tick(bands, level, playing, now, dt);
-        moving |= EqBig.Tick(bands, level, playing, now, dt);
+        bool moving = Eq.Tick(bands, level, playing, now, dt);
+        moving |= Glow.Tick(Eq, now, dt);
 
-        moving |= Glow.Tick(EqBig, now, dt);
+        // the island's edge lights up on the bass: as far as the lowest bar stands above its usual level. Once the
+        // music is out of sight the light is left to die away before the frames stop
+        double beat = EqVisible && playing ? Math.Clamp((Eq.Level(0) - PulseFrom) / (1 - PulseFrom), 0, 1) * PulseShare[Settings.Pulse] : 0;
+        _pulse += (beat - _pulse) * (1 - Math.Exp(-dt / (beat > _pulse ? PulseAttack : PulseRelease)));
+        bool lit = _pulse > 0.004;
+        Body.Beat(lit ? _pulse : _pulse = 0);
 
-        if (!EqVisible || (!playing && !moving))
+        if (!lit && (!EqVisible || (!playing && !moving)))
         {
             CompositionTarget.Rendering -= OnEqFrame;
             _eqRunning = false;
@@ -861,18 +1079,29 @@ public partial class MainWindow : Window
         InfoBat.Text = percent + "%";
         InfoBat.Foreground = plugged ? ChargeText.Foreground : Brushes.White;
 
-        if (_powerKnown && plugged && !_lastPlugged)
-        {
-            ChargeText.Text = percent + "%";
-            ChargeFill.BeginAnimation(WidthProperty, new DoubleAnimation(0, 20 * percent / 100.0, Ms(700))
-            {
-                BeginTime = TimeSpan.FromMilliseconds(250),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            });
-            ShowTransient(View.Charge, 3);
-        }
+        if (_powerKnown && plugged && !_lastPlugged) Charging(percent);
         _powerKnown = true;
         _lastPlugged = plugged;
+    }
+
+    /// <summary>The charger has been plugged in: the pill says so, the battery in it filling up to its level.</summary>
+    void Charging(int percent)
+    {
+        ChargeText.Text = percent + "%";
+        ChargeFill.BeginAnimation(WidthProperty, new DoubleAnimation(0, 20 * percent / 100.0, Ms(700))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(250),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        });
+        ShowTransient(View.Charge, 3);
+
+        // the bolt strikes as the view comes in: it swings down into place, a little past its size and back
+        TimeSpan delay = TimeSpan.FromMilliseconds(70);
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.7 };
+        var grow = new DoubleAnimation(0.3, 1, Ms(520)) { BeginTime = delay, EasingFunction = ease };
+        BoltTurn.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(-35, 0, Ms(520)) { BeginTime = delay, EasingFunction = ease });
+        BoltSize.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        BoltSize.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
     }
 
     /// <summary>Puts the charge of the output device (Bluetooth headphones report one) into the expanded views.</summary>
@@ -905,7 +1134,7 @@ public partial class MainWindow : Window
         if (announce)
             Notify(icon, Brushes.White, device.Kind.Length > 0 ? device.Kind : "Аудиоустройство", name);
         else if (known && (Passed(HeadsetLow) || Passed(HeadsetCritical)))
-            Notify(icon, red, "Низкий заряд", name);
+            Notify(icon, red, "Низкий заряд", name, warn: true);
     }
 
     /// <summary>"Do not disturb" turned on or off: the moon comes up in the pill, and stays by the date in the expanded clock.</summary>
@@ -935,7 +1164,9 @@ public partial class MainWindow : Window
     // ───────────────────────── notices ─────────────────────────
 
     /// <summary>One-off notice in the pill: an icon, a title and a line of detail.</summary>
-    void Notify(Glyph icon, Brush tint, string title, string text, double seconds = 3.2, bool force = false)
+    /// <param name="from">The icon this one turns out of as it comes in, when the two are made of the same pieces.</param>
+    /// <param name="warn">It is a warning: its icon shakes.</param>
+    void Notify(Glyph icon, Brush tint, string title, string text, double seconds = 3.2, bool force = false, Glyph? from = null, bool warn = false)
     {
         // nothing talks over a ringing timer
         if (_ringing && !force) return;
@@ -943,11 +1174,43 @@ public partial class MainWindow : Window
         bool shown = _current == View.Notice;
         NoticeIcon.Kind = icon;
         NoticeIcon.Fill = tint;
+        // the square behind the icon takes a faint wash of its colour
+        if (tint is SolidColorBrush { Color: var c })
+            NoticeBack.Background = new SolidColorBrush(Color.FromArgb((byte)(c.A * NoticeWash), c.R, c.G, c.B));
         NoticeTitle.Text = title;
         NoticeText.Text = text;
         ShowTransient(View.Notice, seconds, force);
         // one notice replacing another: no view change to animate, so blur the new text in
         if (shown) FadeIn(NoticeView);
+        Enter(icon, from, warn);
+    }
+
+    /// <summary>
+    /// Each notice brings its icon in in its own way. One made of pieces comes piece by piece: the arcs of the Wi-Fi
+    /// sign one after another, the stroke through them when the network is lost, the tick of the VPN's shield drawn
+    /// or taken back. Headphones are put on, a speaker thumps, a plug goes in; a warning shakes.
+    /// </summary>
+    void Enter(Glyph icon, Glyph? from, bool warn)
+    {
+        // whatever the notice before this one had set going
+        NoticeSize.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        NoticeSize.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        NoticeTurn.BeginAnimation(RotateTransform.AngleProperty, null);
+        NoticeMove.BeginAnimation(TranslateTransform.YProperty, null);
+        NoticeTurn.CenterY = 0;
+
+        NoticeIcon.Play(from, NoticeWait.TotalSeconds);
+        var back = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.8 };
+        TimeSpan run = TimeSpan.FromMilliseconds(460);
+        if (warn) NoticeTurn.BeginAnimation(RotateTransform.AngleProperty, Sway(NoticeWait, TimeSpan.FromMilliseconds(620), -15, 13, -10, 7, -3, 0));
+        else if (icon == Glyph.Headphones) NoticeMove.BeginAnimation(TranslateTransform.YProperty, Late(-9, 0, NoticeWait, run, back));
+        else if (icon == Glyph.Wired) NoticeMove.BeginAnimation(TranslateTransform.YProperty, Late(8, 0, NoticeWait, run, back));
+        else if (icon == Glyph.Speaker)
+        {
+            DoubleAnimationUsingKeyFrames thump = Late(0.6, 1, NoticeWait, run, new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 5 });
+            NoticeSize.BeginAnimation(ScaleTransform.ScaleXProperty, thump);
+            NoticeSize.BeginAnimation(ScaleTransform.ScaleYProperty, thump);
+        }
     }
 
     void OnNetworkChanged(NetworkService.State was, NetworkService.State now)
@@ -959,16 +1222,16 @@ public partial class MainWindow : Window
             string[] before = was.Vpn.Split('\n', StringSplitOptions.RemoveEmptyEntries);
             string[] after = now.Vpn.Split('\n', StringSplitOptions.RemoveEmptyEntries);
             if (after.Except(before).FirstOrDefault() is { } up)
-                Notify(Glyph.Vpn, (Brush)FindResource("Green"), "VPN включён", up);
+                Notify(Glyph.Vpn, (Brush)FindResource("Green"), "VPN включён", up, from: Glyph.VpnOff);
             else if (before.Except(after).FirstOrDefault() is { } down)
-                Notify(Glyph.Vpn, (Brush)FindResource("Dim"), "VPN отключён", down);
+                Notify(Glyph.VpnOff, (Brush)FindResource("Dim"), "VPN отключён", down, from: Glyph.Vpn);
             // a tunnel going up or down also reshuffles the connection underneath: one notice is enough
             return;
         }
 
         if (now.Link == NetworkService.Link.None)
         {
-            Notify(Glyph.Offline, (Brush)FindResource("Red"), "Нет сети", "Подключение потеряно");
+            Notify(Glyph.Offline, (Brush)FindResource("Red"), "Нет сети", "Подключение потеряно", from: Glyph.Wifi);
             return;
         }
 
@@ -1033,7 +1296,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        TimerRing.Progress = BubbleRing.Progress = _timer.Share;
+        double share = _timer.Share;
+        TimerRing.Progress = BubbleRing.Progress = share;
+        // the ring round the button is large enough for each tick to show as a step: there it glides from one to the next
+        BigRing.BeginAnimation(Ring.ProgressProperty, new DoubleAnimation(share, TimerBigView.IsVisible ? _tick.Interval : TimeSpan.Zero));
         // round up, so it opens on the full time and hits 0:00 as it rings
         int seconds = (int)Math.Ceiling(left.TotalSeconds);
         if (seconds == _timerShown) return;
@@ -1050,9 +1316,11 @@ public partial class MainWindow : Window
     {
         if (on == _urgent) return;
         _urgent = on;
-        Color to = ((SolidColorBrush)FindResource(on ? "Red" : "Orange")).Color;
-        _timerTint.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(to, Ms(300)));
+        _timerTint.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(Tone(on ? "Red" : "Orange"), Ms(300)));
     }
+
+    /// <summary>One of the island's own colours, by the name it has among the resources.</summary>
+    Color Tone(string name) => ((SolidColorBrush)FindResource(name)).Color;
 
     // once a second: the ring swells and settles, the big digits give a little with it
     void Beat()
@@ -1079,16 +1347,21 @@ public partial class MainWindow : Window
         _ringing = true;
         _alarm.Ring();
 
-        var pulse = new DoubleAnimation(1, 1.2, Ms(420))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-        };
-        NoticePulse.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
-        NoticePulse.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
         Notify(Glyph.Bell, (Brush)FindResource("Orange"), "Таймер", "Время вышло · " + total, 12, true);
+        // it rings in rounds, and everything keeps their time. As each starts the bell swings from where it hangs,
+        // the island shakes with it and the edge flashes
+        NoticeTurn.CenterY = BellHangs;
+        NoticeTurn.BeginAnimation(RotateTransform.AngleProperty, Rounds(Sway(TimeSpan.Zero, RingSwing, 24, -22, 17, -13, 8, -4, 0)));
+        RootMove.BeginAnimation(TranslateTransform.XProperty, Rounds(Sway(TimeSpan.Zero, RingSwing * 0.7, -3.5, 3.5, -3, 3, -2, 1.5, -1, 0)));
+        Body.Alarm(Tone("Orange"), RingRound);
         SetTargets();
+
+        static DoubleAnimationUsingKeyFrames Rounds(DoubleAnimationUsingKeyFrames once)
+        {
+            once.Duration = RingRound;
+            once.RepeatBehavior = RepeatBehavior.Forever;
+            return once;
+        }
     }
 
     /// <summary>Silences the alarm of a finished timer.</summary>
@@ -1097,8 +1370,10 @@ public partial class MainWindow : Window
         if (!_ringing) return;
         _ringing = false;
         _alarm.Stop();
-        NoticePulse.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        NoticePulse.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        Body.Still();
+        // the bell and the island come to rest from wherever the round had them
+        NoticeTurn.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(0, Ms(160)));
+        RootMove.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, Ms(160)));
     }
 
     void SetMinutes(int minutes)
@@ -1196,9 +1471,7 @@ public partial class MainWindow : Window
             _cover = _media.Art;
             // the covers cross the way the playlist went: back only when "previous" has just been asked for
             int heading = _time.Elapsed.TotalSeconds - _skipAt < SkipMemory ? _skip : 1;
-            ArtSmall.Show(_cover, heading);
-            ArtToast.Show(_cover, heading);
-            ArtBig.Show(_cover, heading);
+            Art.Show(_cover, heading);
             SyncAccent();
         }
 
@@ -1455,8 +1728,8 @@ public partial class MainWindow : Window
         double width = PlayerLyricBox.Width, top = 0, size = Settings.LyricEffects ? PlayerLyricSmall : 1;
         for (int i = 0; i < lines.Length; i++)
         {
-            // a line with no words marks a break in the singing
-            var row = new Lyric(lines[i].Text.Length > 0 ? lines[i].Text : "♪")
+            // a line with no words marks a break in the singing: the row shows it as dots
+            var row = new Lyric(lines[i].Text)
             {
                 Width = width,
                 Opacity = PlayerLyricDim,
@@ -1511,7 +1784,10 @@ public partial class MainWindow : Window
 
         TimeSpan start = _playerLines[index].Time;
         TimeSpan end = index + 1 < _playerLines.Length ? _playerLines[index + 1].Time : _media.Duration;
-        double seconds = Math.Clamp((end - start).TotalSeconds, 0.3, PlayerLyricLongest);
+        // a line fills in a few seconds at most, whatever is left of its time being a pause; a break is counted
+        // down all the way to the line after it
+        double longest = Lyric.Wordless(_playerLines[index].Text) ? double.MaxValue : PlayerLyricLongest;
+        double seconds = Math.Clamp((end - start).TotalSeconds, 0.3, longest);
         _playerRows[index].Progress = Math.Clamp((_media.Position + LyricLead - start).TotalSeconds / seconds, 0, 1);
     }
 
@@ -1587,10 +1863,11 @@ public partial class MainWindow : Window
         _media.Next();
     }
 
-    // not handled: the click goes on to the pill and closes the player, out of the way of the app it has just brought up
+    // in the player the cover leads to the app that plays; in the pill and the toast it is a part of them like any other.
+    // Not handled: the click goes on to the pill and closes the player, out of the way of the app it has just brought up
     void Art_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (_pressed) SourceApp.Show(_media.Source, _media.Title);
+        if (_pressed && _current == View.MediaBig) SourceApp.Show(_media.Source, _media.Title);
     }
 
     double SeekFraction(MouseEventArgs e) => Math.Clamp(e.GetPosition(SeekArea).X / SeekArea.ActualWidth, 0, 1);
@@ -1712,6 +1989,7 @@ public partial class MainWindow : Window
         else if (_current == View.TimerSet) SetMinutes(_minutes + step);
         else if (_current == View.Look && SizeRow.IsMouseOver) SetScale(Step(Scales, Settings.Scale, step, false));
         else if (_current == View.Look && GapRow.IsMouseOver) SetGap(Step(Gaps, Settings.Gap, step, false));
+        else if (_current == View.Look && PulseRow.IsMouseOver) SetPulse(Math.Clamp(Settings.Pulse + step, 0, Pulses.Length - 1));
         // more files than fit: down goes on to the later ones
         else if (_current == View.Shelf && ShelfOverflow > 0) ScrollShelf(-step);
         // over the open player it is the music that gets louder, not everything else along with it
@@ -2079,6 +2357,7 @@ public partial class MainWindow : Window
 
     void Size_Click(object sender, RoutedEventArgs e) => SetScale(Step(Scales, Settings.Scale, 1, true));
     void Gap_Click(object sender, RoutedEventArgs e) => SetGap(Step(Gaps, Settings.Gap, 1, true));
+    void Pulse_Click(object sender, RoutedEventArgs e) => SetPulse((Settings.Pulse + 1) % Pulses.Length);
 
     void SetScale(int percent)
     {
@@ -2096,6 +2375,14 @@ public partial class MainWindow : Window
         ApplyLook();
     }
 
+    // the edge takes it up on the next frame of the music
+    void SetPulse(int level)
+    {
+        if (level == Settings.Pulse) return;
+        Settings.Pulse = level;
+        UpdateLook();
+    }
+
     void Accent_Click(object sender, RoutedEventArgs e)
     {
         // the strip's first dot is a gradient: that one leaves the colour to the cover
@@ -2110,6 +2397,7 @@ public partial class MainWindow : Window
     {
         SizeText.Text = Settings.Scale + "%";
         GapText.Text = Settings.Gap + " px";
+        PulseText.Text = Pulses[Settings.Pulse];
         foreach (RadioButton dot in AccentStrip.Children)
         {
             Color? colour = dot.Background is SolidColorBrush own ? own.Color : null;

@@ -223,7 +223,8 @@ sealed class MediaService
                     var buffer = new MemoryStream();
                     await stream.CopyToAsync(buffer);
                     buffer.Position = 0;
-                    (art, palette) = Decode(buffer);
+                    // off the UI thread: the old cover is sliding out meanwhile, and must not stutter
+                    (art, palette) = await Task.Run(() => Decode(buffer));
                 }
                 catch { }
                 if (version != _version) return;

@@ -10,7 +10,7 @@ namespace DynamicIsland;
 static class Settings
 {
     const string Key = @"Software\DynamicIsland";
-    const int MinScale = 85, MaxScale = 130, MaxGap = 24;
+    const int MinScale = 85, MaxScale = 130, MaxGap = 24, MaxPulse = 3;
 
     static bool _lyrics = Read(nameof(Lyrics)), _lyricEffects = Read(nameof(LyricEffects));
     static bool _network = Read(nameof(Network)), _hideFullscreen = Read(nameof(HideFullscreen));
@@ -19,6 +19,7 @@ static class Settings
     static int _scale = Math.Clamp(Read(nameof(Scale), 100), MinScale, MaxScale);
     static int _gap = Math.Clamp(Read(nameof(Gap), 8), 0, MaxGap);
     static int _accent = Read(nameof(Accent), 0);
+    static int _pulse = Math.Clamp(Read(nameof(Pulse), 2), 0, MaxPulse);
 
     /// <summary>Look the lyrics of the track up and show them. Off: nothing is sent to LRCLIB.</summary>
     public static bool Lyrics
@@ -94,6 +95,13 @@ static class Settings
     {
         get => _accent == 0 ? null : Color.FromRgb((byte)(_accent >> 16), (byte)(_accent >> 8), (byte)_accent);
         set => Write(nameof(Accent), _accent = value is { } c ? c.R << 16 | c.G << 8 | c.B : 0);
+    }
+
+    /// <summary>How brightly the island's edge lights up on the bass of the music: 0 (not at all) → 3.</summary>
+    public static int Pulse
+    {
+        get => _pulse;
+        set => Write(nameof(Pulse), _pulse = Math.Clamp(value, 0, MaxPulse));
     }
 
     /// <summary>Paths of the files lying on the shelf, in the order they were put there.</summary>

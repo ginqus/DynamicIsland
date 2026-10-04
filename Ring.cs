@@ -6,8 +6,6 @@ namespace DynamicIsland;
 /// <summary>Countdown ring: a faint full circle with what is left drawn over it, emptying clockwise from the top.</summary>
 public sealed class Ring : FrameworkElement
 {
-    const double Thickness = 2.5;
-
     public static readonly DependencyProperty ProgressProperty = DependencyProperty.Register(
         nameof(Progress), typeof(double), typeof(Ring),
         new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -22,6 +20,9 @@ public sealed class Ring : FrameworkElement
         get => (double)GetValue(ProgressProperty);
         set => SetValue(ProgressProperty, value);
     }
+
+    /// <summary>Of the line.</summary>
+    public double Thickness { get; set; } = 2.5;
 
     public Brush Stroke
     {

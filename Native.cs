@@ -9,6 +9,7 @@ static class Native
     public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
     public const long WS_MAXIMIZE = 0x01000000;
+    public const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
     public const long WS_EX_TOOLWINDOW = 0x00000080;
     public const long WS_EX_NOACTIVATE = 0x08000000;
 
@@ -87,8 +88,11 @@ static class Native
         GetClassName(fg, cls, cls.Capacity);
         if (cls.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "XamlExplorerHostIslandWindow") return false;
 
-        // a maximized window on an auto-hide taskbar also covers the monitor
-        if ((GetWindowLongPtr(fg, GWL_STYLE).ToInt64() & WS_MAXIMIZE) != 0) return false;
+        // a maximized window on an auto-hide taskbar also covers the monitor, but it keeps its frame. A browser showing
+        // a video full screen, or a borderless game, may be maximized too: it has dropped the frame
+        long style = GetWindowLongPtr(fg, GWL_STYLE).ToInt64();
+        bool framed = (style & WS_CAPTION) == WS_CAPTION || (style & WS_THICKFRAME) != 0;
+        if ((style & WS_MAXIMIZE) != 0 && framed) return false;
         if (!GetWindowRect(fg, out RECT r)) return false;
 
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };

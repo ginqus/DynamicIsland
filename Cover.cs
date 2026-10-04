@@ -13,15 +13,9 @@ public sealed class Cover : Grid
 {
     const double Small = 0.88; // size the first cover grows from: it has no other to push out
 
-    readonly RectangleGeometry _clip = new();
     Border? _shown;
 
-    public Cover()
-    {
-        // the pictures slide inside the cover's own rounded square
-        Clip = _clip;
-        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
-    }
+    public Cover() => RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
 
     /// <summary>Of the corners.</summary>
     public double Radius { get; set; }
@@ -29,8 +23,8 @@ public sealed class Cover : Grid
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
     {
         base.OnRenderSizeChanged(info);
-        _clip.Rect = new Rect(info.NewSize);
-        _clip.RadiusX = _clip.RadiusY = Radius;
+        // the pictures slide inside the cover's own rounded square
+        Clip = Squircle.Of(new Rect(info.NewSize), Radius);
     }
 
     /// <param name="art">Null leaves the cover empty: whatever lies under it shows.</param>

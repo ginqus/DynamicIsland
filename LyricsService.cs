@@ -154,7 +154,12 @@ sealed class LyricsService
             catch (HttpRequestException)
             {
                 // LRCLIB answers 503 whenever it is busy; one more try is usually enough
-                await Task.Delay(1500);
+                if (attempt == 0) await Task.Delay(1500);
+            }
+            catch (Exception ex) when (ex is TaskCanceledException or JsonException)
+            {
+                // timed out, or the answer is not JSON: this query is given up, the next way of asking may still find it
+                return null;
             }
         }
         return null;
@@ -193,9 +198,11 @@ sealed class LyricsService
             string text = m.Groups[2].Value.Trim();
             foreach (Match stamp in Stamp.Matches(m.Groups[1].Value))
             {
-                double seconds = int.Parse(stamp.Groups[1].Value, CultureInfo.InvariantCulture) * 60
-                    + double.Parse(stamp.Groups[2].Value, CultureInfo.InvariantCulture);
-                lines.Add(new Line(TimeSpan.FromSeconds(seconds), text));
+                // a stamp past what a number holds is a broken one: it is skipped, not the whole entry
+                if (!int.TryParse(stamp.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int minutes)
+                    || !double.TryParse(stamp.Groups[2].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double rest)
+                    || minutes > 24 * 60) continue;
+                lines.Add(new Line(TimeSpan.FromSeconds(minutes * 60 + rest), text));
             }
         }
         lines.Sort((a, b) => a.Time.CompareTo(b.Time));

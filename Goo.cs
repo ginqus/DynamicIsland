@@ -6,7 +6,8 @@ namespace DynamicIsland;
 
 /// <summary>
 /// The island's black body. The pill and the bubble that splits off it are one piece of liquid: while their
-/// round ends are close a neck joins them, thinning as they part until it snaps.
+/// round ends are close a neck joins them, thinning as they part until it snaps. Its light edge is also how the
+/// island says things without words: it glows on the bass of the music, and flashes while an alarm rings.
 /// </summary>
 public sealed class Goo : FrameworkElement
 {
@@ -19,7 +20,15 @@ public sealed class Goo : FrameworkElement
     static readonly Color Plain = Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF);
     const byte Tinted = 0x8C;      // alpha of the edge while it takes a colour: one hue needs more than white to show
 
+    // light the lit edge gives off: a haze to either side of it, laid on in strokes each reaching a px further than
+    // the one before, so it thins out away from the edge
+    static readonly double[] Reach = [2, 3, 4];
+    const double Haze = 0.14;      // how bright each of those strokes is, next to the edge itself
+    // an alarm lights the edge twice at the start of each of its rounds: (share of the round, how bright)
+    static readonly (double At, double Level)[] Flash = [(0, 0), (0.04, 1), (0.13, 0.3), (0.19, 0.9), (0.5, 0), (1, 0)];
+
     readonly SolidColorBrush _rim = new(Plain);
+    readonly Light _beat = new(), _flash = new(); // the edge lit: by the bass of the music, by an alarm
     readonly Pen _edge;
 
     Rect _pill = Rect.Empty, _bubble = Rect.Empty;
@@ -31,8 +40,43 @@ public sealed class Goo : FrameworkElement
     public void Tint(Color? colour, Duration time)
     {
         Color to = colour is { } c ? Color.FromArgb(Tinted, c.R, c.G, c.B) : Plain;
-        // the brush is already in the picture, so nothing is drawn again
+        // the brushes are already in the picture, so nothing is drawn again
         _rim.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(to, time));
+        // the beat lights the edge in the colour it has
+        var lit = new ColorAnimation(colour ?? Colors.White, time);
+        _beat.Edge.BeginAnimation(SolidColorBrush.ColorProperty, lit);
+        _beat.Mist.BeginAnimation(SolidColorBrush.ColorProperty, lit);
+    }
+
+    /// <summary>Lights the edge up by this much, 0 → 1: asked on every frame of the music, with the weight of its bass.</summary>
+    public void Beat(double level)
+    {
+        level = Math.Clamp(level, 0, 1);
+        _beat.Edge.Opacity = level;
+        _beat.Mist.Opacity = level * Haze;
+    }
+
+    /// <summary>Raises the alarm: the edge flashes at the start of every <paramref name="round"/>, until it is told to <see cref="Still"/>.</summary>
+    public void Alarm(Color colour, TimeSpan round)
+    {
+        _flash.Edge.Color = _flash.Mist.Color = colour;
+        _flash.Edge.BeginAnimation(Brush.OpacityProperty, Flashes(1));
+        _flash.Mist.BeginAnimation(Brush.OpacityProperty, Flashes(Haze));
+
+        DoubleAnimationUsingKeyFrames Flashes(double share)
+        {
+            var flashes = new DoubleAnimationUsingKeyFrames { Duration = round, RepeatBehavior = RepeatBehavior.Forever, FillBehavior = FillBehavior.Stop };
+            foreach ((double at, double level) in Flash)
+                flashes.KeyFrames.Add(new LinearDoubleKeyFrame(level * share, KeyTime.FromPercent(at)));
+            return flashes;
+        }
+    }
+
+    /// <summary>Calls the alarm off.</summary>
+    public void Still()
+    {
+        _flash.Edge.BeginAnimation(Brush.OpacityProperty, null);
+        _flash.Mist.BeginAnimation(Brush.OpacityProperty, null);
     }
 
     /// <summary>Where the two are, in this element's own coordinates. An empty bubble is one tucked away out of sight.</summary>
@@ -48,24 +92,24 @@ public sealed class Goo : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         if (_pill.IsEmpty) return;
-        Geometry body = Round(_pill, _radius);
+        Geometry pill = Outline(_pill, _radius);
         if (_bubble.IsEmpty)
         {
-            Draw(dc, body);
+            Draw(dc, pill);
             return;
         }
 
-        Geometry bubble = Round(_bubble, _bubble.Height / 2);
+        Geometry bubble = Outline(_bubble, _bubble.Height / 2);
         Geometry? neck = Neck();
         if (neck == null && !_pill.IntersectsWith(_bubble))
         {
-            Draw(dc, body);
+            Draw(dc, pill);
             Draw(dc, bubble);
             return;
         }
 
         // one outline for the lot, so the rim runs round the whole shape instead of across the joint
-        body = Geometry.Combine(body, bubble, GeometryCombineMode.Union, null, Tolerance, ToleranceType.Absolute);
+        Geometry body = Geometry.Combine(pill, bubble, GeometryCombineMode.Union, null, Tolerance, ToleranceType.Absolute);
         if (neck != null) body = Geometry.Combine(body, neck, GeometryCombineMode.Union, null, Tolerance, ToleranceType.Absolute);
         Draw(dc, body);
     }
@@ -81,15 +125,33 @@ public sealed class Goo : FrameworkElement
 
         dc.PushClip(outside);
         dc.DrawGeometry(null, _edge, body);
+        dc.DrawGeometry(null, _beat.Line, body);
+        dc.DrawGeometry(null, _flash.Line, body);
         dc.Pop();
         dc.DrawGeometry(Brushes.Black, null, body);
+        // the haze of a lit edge lies on the black as much as around it: over a light window that is where it shows
+        foreach (Pen mist in _beat.Mists) dc.DrawGeometry(null, mist, body);
+        foreach (Pen mist in _flash.Mists) dc.DrawGeometry(null, mist, body);
     }
 
-    static Geometry Round(Rect rect, double radius)
+    /// <summary>The whole edge lit: the edge itself drawn over, and a haze to either side of it. See-through until it is turned up.</summary>
+    sealed class Light
+    {
+        public readonly SolidColorBrush Edge = new(Colors.White) { Opacity = 0 }, Mist = new(Colors.White) { Opacity = 0 };
+        public readonly Pen Line;
+        public readonly Pen[] Mists;
+
+        public Light()
+        {
+            Line = new Pen(Edge, 2 * Rim) { LineJoin = PenLineJoin.Round };
+            Mists = Reach.Select(reach => new Pen(Mist, 2 * reach) { LineJoin = PenLineJoin.Round }).ToArray();
+        }
+    }
+
+    static Geometry Outline(Rect rect, double radius)
     {
         rect.Inflate(-Math.Min(Rim, rect.Width / 2), -Math.Min(Rim, rect.Height / 2));
-        radius = Math.Max(radius - Rim, 0);
-        return new RectangleGeometry(rect, radius, radius);
+        return Squircle.Of(rect, Math.Max(radius - Rim, 0));
     }
 
     /// <summary>The bridge between the pill's top right corner and the bubble's left end, each taken as a circle.</summary>
