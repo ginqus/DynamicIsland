@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         [View.TimerBig] = new(330, 92, 40),
         [View.TimerSet] = new(300, 190, 38),
         [View.Menu] = new(300, 248, 34),
-        [View.Settings] = new(320, 334, 34),
+        [View.Settings] = new(320, 374, 34),
         [View.Look] = new(320, 208, 34),
         [View.Shelf] = new(380, 136, 34),
     };
@@ -446,8 +446,10 @@ public partial class MainWindow : Window
     // the bars only cost frames (and audio capture) while they are on screen; once paused they settle and stop
     void SyncEq()
     {
-        _spectrum.Active = EqVisible && _media.IsPlaying;
-        if (!EqVisible || _eqRunning) return;
+            // with the setting on, the bars move to the app that plays rather than to the whole system
+            _spectrum.Source = Settings.AppSpectrum ? _media.Source : "";
+            _spectrum.Active = EqVisible && _media.IsPlaying;
+            if (!EqVisible || _eqRunning) return;
         _eqRunning = true;
         _eqFrame = _time.Elapsed.TotalSeconds;
         CompositionTarget.Rendering += OnEqFrame;
@@ -738,7 +740,10 @@ public partial class MainWindow : Window
 
     void OnEqFrame(object? sender, EventArgs e)
     {
-        double now = _time.Elapsed.TotalSeconds;
+            // the app that plays can change under us, and the spectrum points at one process only
+            _spectrum.Source = Settings.AppSpectrum ? _media.Source : "";
+
+            double now = _time.Elapsed.TotalSeconds;
         double dt = now - _eqFrame;
         if (dt < EqFrame) return;
         _eqFrame = now;
@@ -2032,6 +2037,12 @@ public partial class MainWindow : Window
         UpdateSwitches(true);
     }
 
+    void AppSpectrum_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.AppSpectrum = !Settings.AppSpectrum;
+        UpdateSwitches(true);
+    }
+
     void Network_Click(object sender, RoutedEventArgs e)
     {
         Settings.Network = !Settings.Network;
@@ -2051,6 +2062,7 @@ public partial class MainWindow : Window
         LyricEffectsSwitch.Set(Settings.LyricEffects, animate);
         RimSwitch.Set(Settings.Rim, animate);
         AppVolumeSwitch.Set(Settings.AppVolume, animate);
+        AppSpectrumSwitch.Set(Settings.AppSpectrum, animate);
         NetworkSwitch.Set(Settings.Network, animate);
         FullscreenSwitch.Set(Settings.HideFullscreen, animate);
         AutostartSwitch.Set(Autostart.Enabled, animate);

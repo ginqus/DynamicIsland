@@ -127,8 +127,38 @@ sealed class AudioService
         return found;
     }
 
-    /// <summary>The per-app volumes of the default playback device.</summary>
-    static IAudioSessionManager2? Mixer()
+    /// <summary>The processes that have a sound session on the default playback device right now.</summary>
+        public static IEnumerable<uint> SessionProcesses()
+        {
+            // a fresh mixer every time: one kept from before does not hear of the apps that started since
+            if (Mixer() is not { } mixer) yield break;
+            IAudioSessionEnumerator? sessions = null;
+            try
+            {
+                if (mixer.GetSessionEnumerator(out sessions) != 0 || sessions == null || sessions.GetCount(out int count) != 0) yield break;
+                for (int i = 0; i < count; i++)
+                {
+                    if (sessions.GetSession(i, out object? session) != 0 || session == null) continue;
+                    try
+                    {
+                        if (session is IAudioSessionControl2 control && control.GetProcessId(out uint process) == 0 && process != 0)
+                            yield return process;
+                    }
+                    finally
+                    {
+                        Marshal.ReleaseComObject(session);
+                    }
+                }
+            }
+            finally
+            {
+                if (sessions != null) Marshal.ReleaseComObject(sessions);
+                Marshal.ReleaseComObject(mixer);
+            }
+        }
+
+        /// <summary>The per-app volumes of the default playback device.</summary>
+        static IAudioSessionManager2? Mixer()
     {
         var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
         IMMDevice? device = null;

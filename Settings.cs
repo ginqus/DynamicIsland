@@ -15,6 +15,7 @@ static class Settings
     static bool _lyrics = Read(nameof(Lyrics)), _lyricEffects = Read(nameof(LyricEffects));
     static bool _network = Read(nameof(Network)), _hideFullscreen = Read(nameof(HideFullscreen));
     static bool _rim = Read(nameof(Rim)), _appVolume = Read(nameof(AppVolume));
+    static bool _appSpectrum = Read(nameof(AppSpectrum));
     static int _scale = Math.Clamp(Read(nameof(Scale), 100), MinScale, MaxScale);
     static int _gap = Math.Clamp(Read(nameof(Gap), 8), 0, MaxGap);
     static int _accent = Read(nameof(Accent), 0);
@@ -49,6 +50,16 @@ static class Settings
         get => _appVolume;
         set => Write(nameof(AppVolume), _appVolume = value);
     }
+
+        /// <summary>
+        /// The spectrum follows the app that is playing instead of the whole system.
+        /// Off: every sound the device outputs moves the bars.
+        /// </summary>
+        public static bool AppSpectrum
+        {
+            get => _appSpectrum;
+            set => Write(nameof(AppSpectrum), _appSpectrum = value);
+        }
 
     /// <summary>Notices about Wi-Fi, Ethernet and VPN.</summary>
     public static bool Network

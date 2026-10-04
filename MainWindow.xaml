@@ -676,7 +676,7 @@
                 </Grid>
 
                 <!-- its second page: the switches. The heading leads back -->
-                <Grid x:Name="SettingsView" Width="320" Height="334" HorizontalAlignment="Center" VerticalAlignment="Top">
+                <Grid x:Name="SettingsView" Width="320" Height="374" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,8,10,0">
                         <Button Style="{StaticResource RowButton}" Height="32" Margin="0,0,0,2" Click="SettingsBack_Click">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -715,6 +715,14 @@
                                             HorizontalAlignment="Left" VerticalAlignment="Center"/>
                                 <TextBlock Text="Громкость приложения" Margin="29,0,0,0" VerticalAlignment="Center"/>
                                 <local:Toggle x:Name="AppVolumeSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource RowButton}" Click="AppSpectrum_Click">
+                            <Grid>
+                                <local:Icon Kind="Mid" Width="17" Height="17" Fill="{StaticResource Dim}"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                <TextBlock Text="Спектр приложения" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Toggle x:Name="AppSpectrumSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Network_Click">

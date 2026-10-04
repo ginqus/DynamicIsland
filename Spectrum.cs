@@ -2,7 +2,11 @@ using System.Runtime.InteropServices;
 
 namespace DynamicIsland;
 
-/// <summary>Live spectrum of whatever the default playback device is outputting (WASAPI loopback).</summary>
+/// <summary>
+/// Live spectrum of the default playback device, or of a single app when one is named.
+/// With no app it is WASAPI loopback over the mix format; with one it is the process loopback
+/// device, which carries that process (and its children) alone.
+/// </summary>
 sealed class SpectrumService
 {
     public const int Bands = SpectrumAnalyzer.Bands;
@@ -12,6 +16,10 @@ sealed class SpectrumService
     const int FormatPcm = 1, FormatFloat = 3, FormatExtensible = 0xFFFE;
     const long BufferDuration = 2_000_000; // 200 ms, in 100 ns units
     const int PollMs = 8, SilenceMs = 80, LingerMs = 3000, RetryMs = 2000, DeviceCheckMs = 2000;
+
+    // process loopback runs on a fixed 48 kHz stereo PCM format, so it needs its own rate
+    const int ProcessRate = 48000, ProcessChannels = 2;
+    const int SourceRetryMs = 2000;
 
     readonly object _gate = new();
     readonly float[] _bands = new float[Bands];
@@ -25,8 +33,11 @@ sealed class SpectrumService
     IAudioCaptureClient? _capture;
     SpectrumAnalyzer? _analyzer;
     string? _deviceId;
-    int _channels;
-    bool _float;
+        ProcessLoopback? _process; // set while capturing one app alone
+        uint _processPid;
+        string _processApp = "";   // the app _process was opened for
+        int _channels;
+        bool _float;
     float[] _floats = Array.Empty<float>();
     short[] _shorts = Array.Empty<short>();
     float[] _mono = Array.Empty<float>();
@@ -59,6 +70,27 @@ sealed class SpectrumService
         return true;
     }
 
+        /// <summary>
+            /// The app to follow, as its media session names it; empty means the whole device.
+            /// Set from any thread; the capture thread picks it up on its next poll.
+            /// </summary>
+            public string Source
+            {
+                get => _source;
+                set { if (_source != value) { _source = value; _wake.Set(); } }
+            }
+
+            string _source = "";
+
+            /// <summary>True when one app was named, so capture is routed to that app alone.</summary>
+            bool PerApp => _source.Length > 0;
+
+            /// <summary>True while the capture runs off the process device rather than the default one.</summary>
+            bool _processActive => _process != null;
+
+            /// <summary>True while a capture is open on either device.</summary>
+            bool IsOpen => _process != null || _capture != null;
+
     void Run()
     {
         long lastActive = Environment.TickCount64, lastCheck = 0;
@@ -75,7 +107,16 @@ sealed class SpectrumService
 
             try
             {
-                if (_capture == null)
+                // A different app is playing: the process capture points at one process, so reopen.
+                // When the source is cleared we fall back to the whole device, and back again after.
+                if (IsOpen && _processApp != _source)
+                {
+                    Close();
+                    Thread.Sleep(RetryMs);
+                    continue;
+                }
+
+                if (!IsOpen)
                 {
                     _failed = !Open();
                     if (_failed)
@@ -86,9 +127,10 @@ sealed class SpectrumService
                     }
                     lastCheck = now;
                 }
-                else if (now - lastCheck > DeviceCheckMs)
+                else if (!_processActive && now - lastCheck > DeviceCheckMs)
                 {
-                    // headphones plugged in: follow the new default device
+                    // headphones plugged in: follow the new default device. A process capture does
+                    // not belong to any device, so there is nothing to follow there.
                     lastCheck = now;
                     if (DefaultDeviceId() != _deviceId)
                     {
@@ -119,51 +161,78 @@ sealed class SpectrumService
 
     bool Open()
     {
-        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
-        IMMDevice? device = null;
-        try
+            return PerApp ? OpenProcess() : OpenDevice();
+        }
+
+        /// <summary>Loopback over the default device, in the format the device itself mixes in.</summary>
+        bool OpenDevice()
         {
-            if (enumerator.GetDefaultAudioEndpoint(ERender, EMultimedia, out device) != 0 || device == null) return false;
-            if (device.GetId(out _deviceId) != 0) return false;
-
-            Guid iid = typeof(IAudioClient).GUID;
-            if (device.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out object? client) != 0) return false;
-            _client = client as IAudioClient;
-            if (_client == null || _client.GetMixFormat(out IntPtr format) != 0) return false;
-
-            int rate;
+            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
+            IMMDevice? device = null;
             try
             {
-                int tag = (ushort)Marshal.ReadInt16(format, 0);
-                _channels = (ushort)Marshal.ReadInt16(format, 2);
-                rate = Marshal.ReadInt32(format, 4);
-                int bits = (ushort)Marshal.ReadInt16(format, 14);
-                // WAVEFORMATEXTENSIBLE keeps the real tag in the first field of its SubFormat guid
-                if (tag == FormatExtensible) tag = (ushort)Marshal.ReadInt16(format, 24);
-                _float = tag == FormatFloat && bits == 32;
-                if (_channels == 0 || rate <= 0 || !(_float || (tag == FormatPcm && bits == 16))) return false;
-                if (_client.Initialize(0, StreamLoopback, BufferDuration, 0, format, IntPtr.Zero) != 0) return false;
+                if (enumerator.GetDefaultAudioEndpoint(ERender, EMultimedia, out device) != 0 || device == null) return false;
+                if (device.GetId(out _deviceId) != 0) return false;
+
+                Guid iid = typeof(IAudioClient).GUID;
+                if (device.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out object? client) != 0) return false;
+                _client = client as IAudioClient;
+                if (_client == null || _client.GetMixFormat(out IntPtr format) != 0) return false;
+
+                int rate;
+                try
+                {
+                    int tag = (ushort)Marshal.ReadInt16(format, 0);
+                    _channels = (ushort)Marshal.ReadInt16(format, 2);
+                    rate = Marshal.ReadInt32(format, 4);
+                    int bits = (ushort)Marshal.ReadInt16(format, 14);
+                    // WAVEFORMATEXTENSIBLE keeps the real tag in the first field of its SubFormat guid
+                    if (tag == FormatExtensible) tag = (ushort)Marshal.ReadInt16(format, 24);
+                    _float = tag == FormatFloat && bits == 32;
+                    if (_channels == 0 || rate <= 0 || !(_float || (tag == FormatPcm && bits == 16))) return false;
+                    if (_client.Initialize(0, StreamLoopback, BufferDuration, 0, format, IntPtr.Zero) != 0) return false;
+                }
+                finally
+                {
+                    Marshal.FreeCoTaskMem(format);
+                }
+
+                Guid iidCapture = typeof(IAudioCaptureClient).GUID;
+                if (_client.GetService(ref iidCapture, out object? capture) != 0) return false;
+                _capture = capture as IAudioCaptureClient;
+                if (_capture == null || _client.Start() != 0) return false;
+
+                _analyzer = new SpectrumAnalyzer(rate);
+                _lastData = 0;
+                return true;
             }
             finally
             {
-                Marshal.FreeCoTaskMem(format);
+                if (device != null) Marshal.ReleaseComObject(device);
+                Marshal.ReleaseComObject(enumerator);
             }
+        }
 
-            iid = typeof(IAudioCaptureClient).GUID;
-            if (_client.GetService(ref iid, out object? capture) != 0) return false;
-            _capture = capture as IAudioCaptureClient;
-            if (_capture == null || _client.Start() != 0) return false;
+        /// <summary>Process loopback: the virtual device that carries one process (and its children) alone.</summary>
+        bool OpenProcess()
+        {
+            uint pid = ProcessLoopback.ResolvePid(_source);
+            if (pid == 0) return false;
+            _processPid = pid;
+            _processApp = _source;
 
-            _analyzer = new SpectrumAnalyzer(rate);
+            // this device carries a fixed 48 kHz stereo PCM format rather than the device mix format
+            _channels = ProcessChannels;
+            _float = false;
+
+            var handle = new ProcessLoopback(pid);
+            if (!handle.Open()) return false;
+            _process = handle;
+
+            _analyzer = new SpectrumAnalyzer(ProcessRate);
             _lastData = 0;
             return true;
         }
-        finally
-        {
-            if (device != null) Marshal.ReleaseComObject(device);
-            Marshal.ReleaseComObject(enumerator);
-        }
-    }
 
     static string? DefaultDeviceId()
     {
@@ -183,29 +252,54 @@ sealed class SpectrumService
 
     void Close()
     {
-        try { _client?.Stop(); }
-        catch { }
-        if (_capture != null) Marshal.ReleaseComObject(_capture);
-        if (_client != null) Marshal.ReleaseComObject(_client);
-        _capture = null;
-        _client = null;
-        _analyzer = null;
-        lock (_gate) Array.Clear(_bands);
-    }
+            if (_process != null)
+            {
+                // the process capture owns its own client and capture pointers, so it releases them itself
+                try { _process.Dispose(); }
+                catch (Exception ex) { App.Log(ex); }
+                _process = null;
+                _capture = null;
+                _client = null;
+            }
+            else
+            {
+                try { _client?.Stop(); }
+                catch { }
+                if (_capture != null) Marshal.ReleaseComObject(_capture);
+                if (_client != null) Marshal.ReleaseComObject(_client);
+                _capture = null;
+                _client = null;
+            }
+            _analyzer = null;
+            lock (_gate) Array.Clear(_bands);
+        }
 
     /// <summary>Pulls every pending packet; false once the device is gone.</summary>
     bool Drain()
     {
-        while (true)
-        {
-            if (_capture!.GetNextPacketSize(out uint frames) < 0) return false;
-            if (frames == 0) return true;
-            if (_capture.GetBuffer(out IntPtr data, out frames, out int flags, out _, out _) < 0) return false;
-            if (frames == 0) return true;
-            Push(data, (int)frames, (flags & BufferSilent) != 0);
-            _capture.ReleaseBuffer(frames);
+            if (_process != null) return DrainProcess();
+            while (true)
+            {
+                if (_capture!.GetNextPacketSize(out uint frames) < 0) return false;
+                if (frames == 0) return true;
+                if (_capture.GetBuffer(out IntPtr data, out frames, out int flags, out _, out _) < 0) return false;
+                if (frames == 0) return true;
+                Push(data, (int)frames, (flags & BufferSilent) != 0);
+                _capture.ReleaseBuffer(frames);
+            }
         }
-    }
+
+        /// <summary>Same, but off the process loopback device.</summary>
+        bool DrainProcess()
+        {
+            while (true)
+            {
+                if (!_process!.Next(out IntPtr data, out int frames, out bool silent)) return false;
+                if (frames == 0) return true;
+                Push(data, frames, silent);
+                _process.Release(frames);
+            }
+        }
 
     void Push(IntPtr data, int frames, bool silent)
     {
