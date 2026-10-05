@@ -77,7 +77,7 @@ sealed class ProcessLoopback : IDisposable
         {
             foreach (uint pid in AudioService.SessionProcesses())
             {
-                if (SourceApp.Owns(appId, pid)) return pid;
+                if (SourceApp.OwnsProcess(appId, pid)) return pid;
             }
         }
         catch (Exception ex) { App.Log(ex); }

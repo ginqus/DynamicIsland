@@ -1,20 +1,22 @@
 namespace DynamicIsland;
 
-/// <summary>Damped spring used for every island motion (size, radius, scale, offset).</summary>
 sealed class Spring
 {
     const double Step = 1.0 / 240;
+    const double RestDistance = 0.005, RestVelocity = 0.05;
 
-    public double Value;
-    public double Velocity;
-    public double Target;
-    public double Stiffness = 300;
-    public double Damping = 24;
-
-    public Spring(double value)
+    public Spring(double value, double stiffness = 300, double damping = 24)
     {
         Value = Target = value;
+        Stiffness = stiffness;
+        Damping = damping;
     }
+
+    public double Value { get; set; }
+    public double Velocity { get; set; }
+    public double Target { get; set; }
+    public double Stiffness { get; private set; }
+    public double Damping { get; private set; }
 
     public void Tune(double stiffness, double damping)
     {
@@ -22,7 +24,12 @@ sealed class Spring
         Damping = damping;
     }
 
-    /// <summary>Advances the simulation; returns false once the spring is at rest.</summary>
+    public void Snap(double value)
+    {
+        Value = Target = value;
+        Velocity = 0;
+    }
+
     public bool Advance(double dt)
     {
         while (dt > 0)
@@ -34,12 +41,8 @@ sealed class Spring
             dt -= h;
         }
 
-        if (Math.Abs(Value - Target) < 0.005 && Math.Abs(Velocity) < 0.05)
-        {
-            Value = Target;
-            Velocity = 0;
-            return false;
-        }
-        return true;
+        if (Math.Abs(Value - Target) >= RestDistance || Math.Abs(Velocity) >= RestVelocity) return true;
+        Snap(Target);
+        return false;
     }
 }

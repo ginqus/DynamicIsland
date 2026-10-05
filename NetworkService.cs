@@ -5,64 +5,53 @@ using Connectivity = Windows.Networking.Connectivity.NetworkInformation;
 
 namespace DynamicIsland;
 
-/// <summary>Watches the internet connection and VPN tunnels, and reports each change once it has settled.</summary>
 sealed class NetworkService
 {
     public enum Link { None, Wifi, Wired, Mobile }
 
-    /// <param name="Name">Wi-Fi network name, or the connection profile name for the other links.</param>
-    /// <param name="Vpn">Names of the tunnels that are up, one per line.</param>
-    public readonly record struct State(Link Link, string Name, bool Internet, string Vpn);
+    public readonly record struct State(Link Link, string Name, bool Internet, string Vpn)
+    {
+        public string[] Tunnels => Vpn.Split(TunnelSeparator, StringSplitOptions.RemoveEmptyEntries);
+    }
 
-    // a reconnect goes through several states in a row; only where it lands is worth showing
-    static readonly TimeSpan Settle = TimeSpan.FromSeconds(1.5);
-    const int PropVirtual = 53; // interface type of WireGuard / Wintun style tunnels
-    static readonly string[] VpnHints = { "VPN", "TAP-", "OpenVPN" };
+    const char TunnelSeparator = '\n';
+    const int PropVirtualInterface = 53;
+    static readonly TimeSpan SettleTime = TimeSpan.FromSeconds(1.5);
+    static readonly string[] VpnHints = ["VPN", "TAP-", "OpenVPN"];
 
     readonly Dispatcher _ui;
-    readonly DispatcherTimer _settle;
+    readonly DelayedAction _settle;
     State _state;
     bool _reading;
 
     public NetworkService(Dispatcher ui)
     {
         _ui = ui;
-        _settle = new DispatcherTimer(DispatcherPriority.Background, ui) { Interval = Settle };
-        _settle.Tick += (_, _) =>
-        {
-            _settle.Stop();
-            _ = RefreshAsync();
-        };
+        _settle = new DelayedAction(() => _ = RefreshAsync());
     }
 
-    /// <summary>Raised on the UI thread with the previous and the new state.</summary>
     public event Action<State, State>? Changed;
 
     public async Task StartAsync()
     {
-        _state = await Task.Run(Read);
-        Connectivity.NetworkStatusChanged += _ => Poke();
-        NetworkChange.NetworkAddressChanged += (_, _) => Poke();
+        _state = await Task.Run(ReadState);
+        Connectivity.NetworkStatusChanged += _ => ScheduleRefresh();
+        NetworkChange.NetworkAddressChanged += (_, _) => ScheduleRefresh();
     }
 
-    void Poke() => _ui.InvokeAsync(() =>
-    {
-        _settle.Stop();
-        _settle.Start();
-    });
+    void ScheduleRefresh() => _ui.InvokeAsync(() => _settle.Start(SettleTime));
 
     async Task RefreshAsync()
     {
         if (_reading)
         {
-            // something changed mid-read: look again once this one is done
-            _settle.Start();
+            _settle.Start(SettleTime);
             return;
         }
 
         _reading = true;
         State now;
-        try { now = await Task.Run(Read); }
+        try { now = await Task.Run(ReadState); }
         finally { _reading = false; }
 
         if (now == _state) return;
@@ -71,7 +60,7 @@ sealed class NetworkService
         Changed?.Invoke(was, now);
     }
 
-    static State Read()
+    static State ReadState()
     {
         Link link = Link.None;
         string name = "";
@@ -90,28 +79,26 @@ sealed class NetworkService
         {
             App.Log(ex);
         }
-        return new State(link, name, internet, Tunnels());
+        return new State(link, name, internet, ReadTunnels());
     }
 
-    static string Tunnels()
+    static string ReadTunnels()
     {
         try
         {
-            var up = new List<string>();
-            foreach (NetworkInterface n in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (n.OperationalStatus != OperationalStatus.Up) continue;
-                bool tunnel = n.NetworkInterfaceType == NetworkInterfaceType.Ppp
-                    || (int)n.NetworkInterfaceType == PropVirtual
-                    || VpnHints.Any(hint => n.Description.Contains(hint, StringComparison.OrdinalIgnoreCase));
-                if (tunnel) up.Add(n.Name);
-            }
-            up.Sort(StringComparer.Ordinal);
-            return string.Join('\n', up);
+            return string.Join(TunnelSeparator, NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up && IsTunnel(nic))
+                .Select(nic => nic.Name)
+                .Order(StringComparer.Ordinal));
         }
         catch
         {
             return "";
         }
     }
+
+    static bool IsTunnel(NetworkInterface nic) =>
+        nic.NetworkInterfaceType == NetworkInterfaceType.Ppp
+        || (int)nic.NetworkInterfaceType == PropVirtualInterface
+        || VpnHints.Any(hint => nic.Description.Contains(hint, StringComparison.OrdinalIgnoreCase));
 }

@@ -1,44 +1,65 @@
 using System.IO;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Windows.Foundation;
 using Windows.Media.Control;
+using Windows.Storage.Streams;
 using Manager = Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager;
 using Session = Windows.Media.Control.GlobalSystemMediaTransportControlsSession;
 using Status = Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus;
 
 namespace DynamicIsland;
 
-/// <summary>Now-playing info from whatever app owns the system media session (Spotify, browser, ...).</summary>
 sealed class MediaService
 {
-    static readonly Color[] Plain = [Colors.White];
-    const double Turn = 28; // degrees to either side on the colour wheel, for the neighbours of a lone hue
+    const string Untitled = "Без названия";
+    const string BarSeparator = " – ";
+    const int MinPercentToMeasure = 10;
+    const int PollPlayingMs = 250, PollPausedMs = 1000;
+    const int UnsetYear = 2000;
 
     readonly Dispatcher _ui;
+    readonly PlayerBar _bar = new();
     Manager? _manager;
     Session? _session;
-    Session? _chosen; // the app the island was turned to by hand: it stays on show until another one starts to play
-    int _version;
+    Session? _pinned;
+    int _refreshVersion;
 
+    string _title = "", _artist = "";
     TimeSpan _position, _duration;
     DateTime _positionAt = DateTime.UtcNow;
     DateTimeOffset _timelineStamp;
     double _rate = 1;
+    Status _status;
+
+    bool _noTimeline;
+    bool _barSearched;
+    bool _barFound;
+    string _barText = "", _barTitle = "", _barArtist = "";
+    TimeSpan _barTime = TimeSpan.MinValue;
+    int _barPercent = -1;
+    TimeSpan _measuredLength;
+    TimeSpan _assumedLength;
 
     public MediaService(Dispatcher ui) => _ui = ui;
 
-    public string Title { get; private set; } = "";
-    public string Artist { get; private set; } = "";
+    public event Action? Changed;
+
+    public string Title => _title.Length > 0 ? _title : _barTitle;
+    public string Artist => _title.Length > 0 ? _artist : _barArtist;
+    public string Name => Title.Length > 0 ? Title : SourceApp.Name(Source) is { Length: > 0 } app ? app : Untitled;
     public ImageSource? Art { get; private set; }
-    /// <summary>Colours of the cover; the first stands for the whole of it.</summary>
-    public Color[] Palette { get; private set; } = Plain;
+    public Color[] Palette { get; private set; } = CoverPalette.Plain;
     public Color Accent => Palette[0];
     public bool IsPlaying { get; private set; }
-    public bool HasTrack => _session != null && Title.Length > 0;
+    public bool HasTrack => _session != null && (Title.Length > 0 || (_noTimeline && _barSearched && IsLive));
     public TimeSpan Duration => _duration;
+    public bool HasBarPosition => _noTimeline && _barFound;
+    public bool Seekable => _noTimeline ? _barFound : _duration.TotalSeconds >= 1;
 
-    /// <summary>Id of the app that plays, as the session gives it; empty when there is none.</summary>
+    public double Progress => _duration.TotalSeconds >= 1 ? Math.Clamp(Position / _duration, 0, 1)
+        : HasBarPosition && _barPercent > 0 ? _barPercent / 100.0 : 0;
+
     public string Source
     {
         get
@@ -52,46 +73,49 @@ sealed class MediaService
     {
         get
         {
-            TimeSpan p = _position;
-            if (IsPlaying) p += (DateTime.UtcNow - _positionAt) * _rate;
-            if (p < TimeSpan.Zero) return TimeSpan.Zero;
-            return p > _duration ? _duration : p;
+            TimeSpan position = RunningPosition;
+            if (position < TimeSpan.Zero || (_noTimeline && !_barFound)) return TimeSpan.Zero;
+            bool endless = _noTimeline && _duration <= TimeSpan.Zero;
+            return position > _duration && !endless ? _duration : position;
         }
     }
 
-    /// <summary>Raised on the UI thread.</summary>
-    public event Action? Changed;
+    TimeSpan RunningPosition => IsPlaying ? _position + (DateTime.UtcNow - _positionAt) * _rate : _position;
+
+    bool IsLive => _status is Status.Playing or Status.Paused;
+
+    public void AssumeDuration(TimeSpan length)
+    {
+        _assumedLength = length;
+        if (_noTimeline) UpdateBarDuration();
+    }
 
     public async Task StartAsync()
     {
         _manager = await Manager.RequestAsync();
         _manager.CurrentSessionChanged += (_, _) => _ui.InvokeAsync(() =>
         {
-            Yield();
-            Attach();
+            UnpinIfAnotherPlays();
+            AttachSession();
         });
-        _manager.SessionsChanged += (_, _) => _ui.InvokeAsync(Attach);
-        Attach();
+        _manager.SessionsChanged += (_, _) => _ui.InvokeAsync(AttachSession);
+        AttachSession();
+        WatchBar();
     }
 
-    /// <summary>Turns to the next app with a media session, or the previous one; they go round in a circle.</summary>
-    /// <returns>False when there is no other app to turn to.</returns>
-    public bool Switch(int direction)
+    public bool SwitchSession(int direction)
     {
         try
         {
             var sessions = _manager?.GetSessions();
             if (sessions == null || sessions.Count < 2) return false;
 
-            int count = sessions.Count, at = -1;
-            for (int i = 0; i < count && at < 0; i++)
-                if (ReferenceEquals(sessions[i], _session)) at = i;
-            for (int i = 0; i < count && at < 0; i++)
-                if (Same(sessions[i], _session)) at = i;
+            int count = sessions.Count;
+            int at = IndexOf(sessions, session => ReferenceEquals(session, _session));
+            if (at < 0) at = IndexOf(sessions, session => SameApp(session, _session));
 
-            // nothing on show yet: start from either end
-            _chosen = sessions[at < 0 ? (direction > 0 ? 0 : count - 1) : ((at + direction) % count + count) % count];
-            Attach();
+            _pinned = sessions[at < 0 ? (direction > 0 ? 0 : count - 1) : ((at + direction) % count + count) % count];
+            AttachSession();
             return true;
         }
         catch
@@ -100,18 +124,65 @@ sealed class MediaService
         }
     }
 
-    // an app that starts to play takes the island over, as it always did, whatever it had been turned to
-    void Yield()
+    public void TogglePlay() => SendCommand(session => session.TryTogglePlayPauseAsync());
+
+    public void Next() => SendCommand(session => session.TrySkipNextAsync());
+
+    public void Previous() => SendCommand(session => session.TrySkipPreviousAsync());
+
+    public async void Seek(double fraction)
     {
+        Session? session = _session;
+        if (session == null) return;
+        if (_noTimeline)
+        {
+            if (!_barFound || !await Task.Run(() => _bar.Seek(fraction)) || !ReferenceEquals(session, _session)) return;
+            _position = _duration * Math.Clamp(fraction, 0, 1);
+            _positionAt = DateTime.UtcNow;
+            _barTime = TimeSpan.MinValue;
+            _barPercent = -1;
+            Changed?.Invoke();
+            return;
+        }
+        if (_duration <= TimeSpan.Zero) return;
         try
         {
-            Session? current = _manager?.GetCurrentSession();
-            if (current != null && !Same(current, _chosen) && Playing(current)) _chosen = null;
+            var target = TimeSpan.FromTicks((long)(_duration.Ticks * Math.Clamp(fraction, 0, 1)));
+            TimeSpan start = session.GetTimelineProperties().StartTime;
+            if (await session.TryChangePlaybackPositionAsync((start + target).Ticks))
+            {
+                _position = target;
+                _positionAt = DateTime.UtcNow;
+                Changed?.Invoke();
+            }
         }
         catch { }
     }
 
-    static bool Same(Session? a, Session? b)
+    async void SendCommand(Func<Session, IAsyncOperation<bool>> command)
+    {
+        try { if (_session != null) await command(_session); }
+        catch { }
+    }
+
+    static int IndexOf(IReadOnlyList<Session> sessions, Func<Session, bool> match)
+    {
+        for (int i = 0; i < sessions.Count; i++)
+            if (match(sessions[i])) return i;
+        return -1;
+    }
+
+    void UnpinIfAnotherPlays()
+    {
+        try
+        {
+            Session? current = _manager?.GetCurrentSession();
+            if (current != null && !SameApp(current, _pinned) && IsPlayingSession(current)) _pinned = null;
+        }
+        catch { }
+    }
+
+    static bool SameApp(Session? a, Session? b)
     {
         if (a == null || b == null) return false;
         if (ReferenceEquals(a, b)) return true;
@@ -119,7 +190,13 @@ sealed class MediaService
         catch { return false; }
     }
 
-    void Attach()
+    static bool IsPlayingSession(Session session)
+    {
+        try { return session.GetPlaybackInfo().PlaybackStatus == Status.Playing; }
+        catch { return false; }
+    }
+
+    void AttachSession()
     {
         if (_session != null)
         {
@@ -132,8 +209,14 @@ sealed class MediaService
             catch { }
         }
 
-        _session = Pick();
+        Session? previous = _session;
+        _session = PickSession();
         _timelineStamp = default;
+        if (!SameApp(previous, _session))
+        {
+            _noTimeline = _barSearched = false;
+            ForgetBar();
+        }
 
         if (_session != null)
         {
@@ -144,23 +227,19 @@ sealed class MediaService
         _ = RefreshAsync();
     }
 
-    Session? Pick()
+    Session? PickSession()
     {
         try
         {
-            if (_chosen != null)
+            if (_pinned != null)
             {
-                foreach (Session s in _manager!.GetSessions())
-                    if (Same(s, _chosen)) return s;
-                // its app is gone
-                _chosen = null;
+                if (_manager!.GetSessions().FirstOrDefault(session => SameApp(session, _pinned)) is { } pinned) return pinned;
+                _pinned = null;
             }
 
             Session? current = _manager?.GetCurrentSession();
-            if (current != null && Playing(current)) return current;
-            foreach (Session s in _manager!.GetSessions())
-                if (Playing(s)) return s;
-            return current;
+            if (current != null && IsPlayingSession(current)) return current;
+            return _manager!.GetSessions().FirstOrDefault(IsPlayingSession) ?? current;
         }
         catch
         {
@@ -168,22 +247,16 @@ sealed class MediaService
         }
     }
 
-    static bool Playing(Session s)
-    {
-        try { return s.GetPlaybackInfo().PlaybackStatus == Status.Playing; }
-        catch { return false; }
-    }
+    void OnProperties(Session session, MediaPropertiesChangedEventArgs e) => _ui.InvokeAsync(() => _ = RefreshAsync());
 
-    void OnProperties(Session s, MediaPropertiesChangedEventArgs e) => _ui.InvokeAsync(() => _ = RefreshAsync());
-
-    void OnPlayback(Session s, PlaybackInfoChangedEventArgs e) => _ui.InvokeAsync(() =>
+    void OnPlayback(Session session, PlaybackInfoChangedEventArgs e) => _ui.InvokeAsync(() =>
     {
         ReadPlayback();
         ReadTimeline();
         Changed?.Invoke();
     });
 
-    void OnTimeline(Session s, TimelinePropertiesChangedEventArgs e) => _ui.InvokeAsync(() =>
+    void OnTimeline(Session session, TimelinePropertiesChangedEventArgs e) => _ui.InvokeAsync(() =>
     {
         ReadTimeline();
         Changed?.Invoke();
@@ -192,13 +265,13 @@ sealed class MediaService
     async Task RefreshAsync()
     {
         Session? session = _session;
-        int version = ++_version;
+        int version = ++_refreshVersion;
 
         if (session == null)
         {
-            Title = Artist = "";
+            _title = _artist = "";
             Art = null;
-            Palette = Plain;
+            Palette = CoverPalette.Plain;
             IsPlaying = false;
             Changed?.Invoke();
             return;
@@ -206,33 +279,20 @@ sealed class MediaService
 
         try
         {
-            var props = await session.TryGetMediaPropertiesAsync();
-            if (version != _version) return;
+            var properties = await session.TryGetMediaPropertiesAsync();
+            if (version != _refreshVersion) return;
 
-            string title = props.Title ?? "";
-            bool sameTrack = title == Title;
-            ImageSource? art = null;
-            Color[] palette = Plain;
-
-            if (props.Thumbnail != null)
+            string title = properties.Title ?? "";
+            bool sameTrack = title == _title;
+            (ImageSource? art, Color[] palette) = (null, CoverPalette.Plain);
+            if (properties.Thumbnail != null)
             {
-                try
-                {
-                    using var source = await props.Thumbnail.OpenReadAsync();
-                    using var stream = source.AsStreamForRead();
-                    var buffer = new MemoryStream();
-                    await stream.CopyToAsync(buffer);
-                    buffer.Position = 0;
-                    // off the UI thread: the old cover is sliding out meanwhile, and must not stutter
-                    (art, palette) = await Task.Run(() => Decode(buffer));
-                }
-                catch { }
-                if (version != _version) return;
+                (art, palette) = await LoadCoverAsync(properties.Thumbnail);
+                if (version != _refreshVersion) return;
             }
 
-            Title = title;
-            Artist = props.Artist ?? "";
-            // browsers briefly drop the thumbnail while updating metadata — keep the old one
+            _title = title;
+            _artist = properties.Artist ?? "";
             if (art != null || !sameTrack)
             {
                 Art = art;
@@ -249,19 +309,42 @@ sealed class MediaService
         Changed?.Invoke();
     }
 
+    static async Task<(ImageSource? Art, Color[] Palette)> LoadCoverAsync(IRandomAccessStreamReference thumbnail)
+    {
+        try
+        {
+            using var source = await thumbnail.OpenReadAsync();
+            using var stream = source.AsStreamForRead();
+            var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            buffer.Position = 0;
+            return await Task.Run(() => CoverPalette.Decode(buffer));
+        }
+        catch
+        {
+            return (null, CoverPalette.Plain);
+        }
+    }
+
     void ReadPlayback()
     {
         if (_session == null) return;
         try
         {
             var info = _session.GetPlaybackInfo();
-            bool playing = info.PlaybackStatus == Status.Playing;
+            Status status = info.PlaybackStatus;
+            bool playing = status == Status.Playing;
             if (playing != IsPlaying)
             {
-                // freeze / resume our own clock: not every app pushes a timeline update here
                 _position = Position;
                 _positionAt = DateTime.UtcNow;
                 IsPlaying = playing;
+            }
+            if (status != _status)
+            {
+                _status = status;
+                if (IsLive) _bar.ResetRetry();
+                else ForgetBar();
             }
             _rate = info.PlaybackRate ?? 1;
         }
@@ -273,165 +356,106 @@ sealed class MediaService
         if (_session == null) return;
         try
         {
-            var t = _session.GetTimelineProperties();
-            _duration = t.EndTime - t.StartTime;
-            if (t.LastUpdatedTime == _timelineStamp) return;
+            var timeline = _session.GetTimelineProperties();
+            _noTimeline = timeline.LastUpdatedTime.Year < UnsetYear && timeline.EndTime <= timeline.StartTime;
+            if (_noTimeline)
+            {
+                UpdateBarDuration();
+                return;
+            }
 
-            _timelineStamp = t.LastUpdatedTime;
-            _position = t.Position - t.StartTime;
-            DateTime at = t.LastUpdatedTime.UtcDateTime;
-            _positionAt = at.Year < 2000 ? DateTime.UtcNow : at;
+            _duration = timeline.EndTime - timeline.StartTime;
+            if (timeline.LastUpdatedTime == _timelineStamp) return;
+
+            _timelineStamp = timeline.LastUpdatedTime;
+            _position = timeline.Position - timeline.StartTime;
+            DateTime updated = timeline.LastUpdatedTime.UtcDateTime;
+            _positionAt = updated.Year < UnsetYear ? DateTime.UtcNow : updated;
         }
         catch { }
     }
 
-    public async void TogglePlay()
+    async void WatchBar()
     {
-        try { if (_session != null) await _session.TryTogglePlayPauseAsync(); }
-        catch { }
-    }
-
-    public async void Next()
-    {
-        try { if (_session != null) await _session.TrySkipNextAsync(); }
-        catch { }
-    }
-
-    public async void Previous()
-    {
-        try { if (_session != null) await _session.TrySkipPreviousAsync(); }
-        catch { }
-    }
-
-    public async void Seek(double fraction)
-    {
-        Session? session = _session;
-        if (session == null || _duration <= TimeSpan.Zero) return;
-        try
+        while (true)
         {
-            var target = TimeSpan.FromTicks((long)(_duration.Ticks * Math.Clamp(fraction, 0, 1)));
-            TimeSpan start = session.GetTimelineProperties().StartTime;
-            if (await session.TryChangePlaybackPositionAsync((start + target).Ticks))
+            await Task.Delay(IsPlaying ? PollPlayingMs : PollPausedMs);
+            Session? session = _session;
+            if (session == null || !_noTimeline || !IsLive) continue;
+            try
             {
-                _position = target;
+                string app = Source;
+                if (!PlayerBar.Supports(app)) continue;
+                PlayerBar.Reading? reading = await Task.Run(() => _bar.Read(app));
+                if (ReferenceEquals(session, _session) && _noTimeline && IsLive) ApplyBarReading(reading);
+            }
+            catch (Exception ex)
+            {
+                App.Log(ex);
+            }
+        }
+    }
+
+    void ApplyBarReading(PlayerBar.Reading? reading)
+    {
+        bool hadTrack = HasTrack;
+        (string title, TimeSpan duration) = (Title, _duration);
+        _barSearched = true;
+
+        if (reading is { } bar)
+        {
+            _barFound = true;
+            if (bar.Text != _barText)
+            {
+                ForgetBar();
+                _barFound = true;
+                _barText = bar.Text;
+                int dash = bar.Text.IndexOf(BarSeparator, StringComparison.Ordinal);
+                (_barArtist, _barTitle) = dash > 0 ? (bar.Text[..dash], bar.Text[(dash + BarSeparator.Length)..]) : ("", bar.Text);
+            }
+            if (bar.Time != _barTime)
+            {
+                _barTime = _position = bar.Time;
                 _positionAt = DateTime.UtcNow;
-                Changed?.Invoke();
             }
+            MeasureLength(bar.Percent);
         }
-        catch { }
-    }
-
-    static (ImageSource, Color[]) Decode(MemoryStream data)
-    {
-        var bitmap = new BitmapImage();
-        bitmap.BeginInit();
-        bitmap.CacheOption = BitmapCacheOption.OnLoad;
-        bitmap.DecodePixelWidth = 192;
-        bitmap.StreamSource = data;
-        bitmap.EndInit();
-        bitmap.Freeze();
-        return (bitmap, PaletteOf(bitmap));
-    }
-
-    /// <summary>
-    /// Up to three colours of the cover, lifted so they read on black: the saturation-weighted average of the
-    /// whole of it, then the hues that stand out in it. A cover of one hue is filled up with that hue's neighbours.
-    /// </summary>
-    static Color[] PaletteOf(BitmapSource source)
-    {
-        const int Slices = 12, Wanted = 3; // of the colour wheel; colours in the palette
-        const double Share = 0.08;         // of the cover's weight a hue needs to count
-        const double Apart = 64;           // ...and how far it has to be from the others, as a distance in RGB
-        try
+        else if (_barFound)
         {
-            var small = new TransformedBitmap(source,
-                new ScaleTransform(24.0 / source.PixelWidth, 24.0 / source.PixelHeight));
-            var bgra = new FormatConvertedBitmap(small, PixelFormats.Bgra32, null, 0);
-            int w = bgra.PixelWidth, h = bgra.PixelHeight;
-            var px = new byte[w * h * 4];
-            bgra.CopyPixels(px, w * 4, 0);
-
-            // weighted sums of red, green and blue, and the weight: per slice of the wheel, the whole cover last
-            var sums = new double[Slices + 1, 4];
-            for (int i = 0; i < px.Length; i += 4)
-            {
-                double r = px[i + 2], g = px[i + 1], b = px[i];
-                double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
-                double sat = max == 0 ? 0 : (max - min) / max;
-                double weight = sat * sat * (max / 255) + 0.01;
-                foreach (int row in new[] { Slice(r, g, b), Slices })
-                {
-                    sums[row, 0] += r * weight;
-                    sums[row, 1] += g * weight;
-                    sums[row, 2] += b * weight;
-                    sums[row, 3] += weight;
-                }
-            }
-
-            int Slice(double r, double g, double b) => (int)(Hue(r, g, b) / 360 * Slices) % Slices;
-            Color? Mean(int row) => Lift(sums[row, 0] / sums[row, 3], sums[row, 1] / sums[row, 3], sums[row, 2] / sums[row, 3]);
-
-            if (Mean(Slices) is not { } accent) return Plain;
-            var palette = new List<Color> { accent };
-            // the heaviest hues first, each far enough from the colours already in to be told from them
-            foreach (int slice in Enumerable.Range(0, Slices).OrderByDescending(s => sums[s, 3]))
-            {
-                if (palette.Count == Wanted || sums[slice, 3] < Share * sums[Slices, 3]) break;
-                if (Mean(slice) is not { } colour) continue;
-                if (palette.Any(c => Math.Sqrt(Math.Pow(c.R - colour.R, 2) + Math.Pow(c.G - colour.G, 2) + Math.Pow(c.B - colour.B, 2)) < Apart)) continue;
-                palette.Add(colour);
-            }
-            for (double turn = Turn; palette.Count < Wanted; turn = -turn) palette.Add(Turned(accent, turn));
-            return palette.ToArray();
+            ForgetBar();
         }
-        catch
-        {
-            return Plain;
-        }
+
+        UpdateBarDuration();
+        if (HasTrack != hadTrack || Title != title || _duration != duration) Changed?.Invoke();
     }
 
-    /// <summary>The palette of a colour picked by hand instead of a cover: the colour and its neighbours on the wheel.</summary>
-    public static Color[] Around(Color colour) => [colour, Turned(colour, Turn), Turned(colour, -Turn)];
-
-    /// <summary>Brightens a colour to read on black, then pulls it a little towards white to keep it from going fully neon.</summary>
-    static Color? Lift(double r, double g, double b)
+    void MeasureLength(int percent)
     {
-        double peak = Math.Max(r, Math.Max(g, b));
-        if (!(peak >= 1)) return null;
-        double lift = 235 / peak;
-        r *= lift; g *= lift; b *= lift;
+        if (percent == _barPercent) return;
 
-        const double white = 0.18;
-        return Color.FromRgb(
-            (byte)(r + (255 - r) * white),
-            (byte)(g + (255 - g) * white),
-            (byte)(b + (255 - b) * white));
+        bool stepped = IsPlaying && percent == _barPercent + 1;
+        _barPercent = percent;
+        if (!stepped || percent < MinPercentToMeasure) return;
+
+        double length = RunningPosition.TotalSeconds * 100 / (percent - 0.5);
+        if (_measuredLength == TimeSpan.Zero || Math.Abs(length - _measuredLength.TotalSeconds) > 50.0 / percent)
+            _measuredLength = TimeSpan.FromSeconds(Math.Round(length));
     }
 
-    /// <summary>Where a colour sits on the wheel, in degrees; greys sit at 0.</summary>
-    static double Hue(double r, double g, double b)
+    void UpdateBarDuration()
     {
-        double max = Math.Max(r, Math.Max(g, b)), span = max - Math.Min(r, Math.Min(g, b));
-        if (span <= 0) return 0;
-        double hue = max == r ? (g - b) / span : max == g ? 2 + (b - r) / span : 4 + (r - g) / span;
-        return (hue * 60 + 360) % 360;
+        if (_assumedLength > TimeSpan.Zero && _barPercent >= 0
+            && Math.Abs(RunningPosition / _assumedLength * 100 - _barPercent) > 1.5 + 150 / _assumedLength.TotalSeconds)
+            _assumedLength = TimeSpan.Zero;
+        _duration = !_barFound ? TimeSpan.Zero : _measuredLength > TimeSpan.Zero ? _measuredLength : _assumedLength;
     }
 
-    /// <summary>The same colour further round the wheel: as light and as saturated, another hue.</summary>
-    static Color Turned(Color c, double degrees)
+    void ForgetBar()
     {
-        double max = Math.Max(c.R, Math.Max(c.G, c.B)), min = Math.Min(c.R, Math.Min(c.G, c.B));
-        double hue = (Hue(c.R, c.G, c.B) + degrees + 360) % 360 / 60;
-        double mid = min + (max - min) * (1 - Math.Abs(hue % 2 - 1)); // the channel between the strongest and the weakest
-        (double r, double g, double b) = (int)hue switch
-        {
-            0 => (max, mid, min),
-            1 => (mid, max, min),
-            2 => (min, max, mid),
-            3 => (min, mid, max),
-            4 => (mid, min, max),
-            _ => (max, min, mid),
-        };
-        return Color.FromRgb((byte)r, (byte)g, (byte)b);
+        _barFound = false;
+        _barText = _barTitle = _barArtist = "";
+        _barTime = TimeSpan.MinValue;
+        _barPercent = -1;
+        _measuredLength = _assumedLength = TimeSpan.Zero;
     }
 }

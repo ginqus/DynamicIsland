@@ -3,9 +3,11 @@ using System.Windows.Media;
 
 namespace DynamicIsland;
 
-/// <summary>Countdown ring: a faint full circle with what is left drawn over it, emptying clockwise from the top.</summary>
 public sealed class Ring : FrameworkElement
 {
+    const double TrackOpacity = 0.3;
+    const double Empty = 0.001, Full = 0.999;
+
     public static readonly DependencyProperty ProgressProperty = DependencyProperty.Register(
         nameof(Progress), typeof(double), typeof(Ring),
         new FrameworkPropertyMetadata(1.0, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -14,14 +16,12 @@ public sealed class Ring : FrameworkElement
         nameof(Stroke), typeof(Brush), typeof(Ring),
         new FrameworkPropertyMetadata(Brushes.White, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    /// <summary>Share still to go, 1 → 0.</summary>
     public double Progress
     {
         get => (double)GetValue(ProgressProperty);
         set => SetValue(ProgressProperty, value);
     }
 
-    /// <summary>Of the line.</summary>
     public double Thickness { get; set; } = 2.5;
 
     public Brush Stroke
@@ -38,19 +38,18 @@ public sealed class Ring : FrameworkElement
         var center = new Point(ActualWidth / 2, ActualHeight / 2);
         var pen = new Pen(Stroke, Thickness) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
 
-        dc.PushOpacity(0.3);
+        dc.PushOpacity(TrackOpacity);
         dc.DrawEllipse(null, pen, center, r, r);
         dc.Pop();
 
         double share = Math.Clamp(Progress, 0, 1);
-        if (share <= 0.001) return;
-        if (share >= 0.999)
+        if (share <= Empty) return;
+        if (share >= Full)
         {
             dc.DrawEllipse(null, pen, center, r, r);
             return;
         }
 
-        // what is left runs from the moving end round to twelve o'clock
         double angle = 2 * Math.PI * (1 - share);
         var from = new Point(center.X + r * Math.Sin(angle), center.Y - r * Math.Cos(angle));
         var arc = new StreamGeometry();

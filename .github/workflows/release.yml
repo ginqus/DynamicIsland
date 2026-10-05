@@ -1,6 +1,5 @@
 name: Release
 
-# Pushing a tag like v1.2.0 builds the exe and publishes it as a GitHub release
 on:
   push:
     tags: ['v*']
@@ -20,7 +19,6 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # self-contained: runs on a clean Windows, no .NET install needed
       - name: Publish
         shell: pwsh
         run: >
@@ -36,4 +34,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:TAG out/DynamicIsland.exe --title "Dynamic Island $env:TAG" --generate-notes
+        run: |
+          git fetch origin "+refs/tags/${env:TAG}:refs/tags/${env:TAG}"
+          $notes = @()
+          if ((git cat-file -t $env:TAG) -eq 'tag') { $notes = @(git tag -l --format='%(contents)' $env:TAG) }
+          if ("$notes".Trim()) {
+            $notes | Set-Content notes.md -Encoding utf8
+            gh release create $env:TAG out/DynamicIsland.exe --title "Dynamic Island $env:TAG" --notes-file notes.md
+          } else {
+            gh release create $env:TAG out/DynamicIsland.exe --title "Dynamic Island $env:TAG" --generate-notes
+          }

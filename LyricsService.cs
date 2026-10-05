@@ -5,20 +5,26 @@ using System.Text.RegularExpressions;
 
 namespace DynamicIsland;
 
-/// <summary>Time-synced lyrics for the current track, from LRCLIB (lrclib.net).</summary>
 sealed class LyricsService
 {
     public readonly record struct Line(TimeSpan Time, string Text);
 
-    /// <param name="End">When the last sung line starts, in seconds.</param>
     sealed record Candidate(double Duration, double End, Line[] Lines);
 
-    // a version of the song that is longer or shorter than this is timed differently
-    const double Tolerance = 4;
+    const string SearchUrl = "https://lrclib.net/api/search?";
+    const string TitleSeparator = " - ";
+    const double DurationTolerance = 4;
+    const double EndSlack = 1;
+    const double MinTimeline = 1;
+    const double RestretchAfter = 0.5;
+    const double MinUsualDuration = 30;
+    const double MinStretch = 0.5, MaxStretch = 2;
+    const int Attempts = 2;
+    const int RetryDelayMs = 1500;
+    const int MaxMinutes = 24 * 60;
 
     static readonly Line[] None = [];
     static readonly HttpClient Http = CreateClient();
-    // marks of a reworked take: LRCLIB only knows the song itself, so they are dropped from the search
     const string Rework = @"remix|rmx|sped\s*up|speed\s*up|slowed|reverb|nightcore|hardstyle|phonk|bootleg|mashup|ремикс";
 
     static readonly Regex Noise = new(
@@ -26,8 +32,8 @@ sealed class LyricsService
         + Rework + @")\b[^\)\]]*[\)\]]",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex Reworked = new(@"\b(" + Rework + @")\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    static readonly Regex ReworkTail = new(@"\s*[-–—+]?\s*\b(" + Rework + @")\b.*$", RegexOptions.IgnoreCase | RegexOptions.Compiled); // "Song slowed + reverb"
-    static readonly Regex Pipes = new(@"\s*\|[^|]*\|\s*|\s+\|\s.*$", RegexOptions.Compiled); // "Song |remix|", "Song | Channel"
+    static readonly Regex ReworkTail = new(@"\s*[-–—+]?\s*\b(" + Rework + @")\b.*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex Pipes = new(@"\s*\|[^|]*\|\s*|\s+\|\s.*$", RegexOptions.Compiled);
     static readonly Regex Channel = new(@"\s*-\s*Topic$|\s*VEVO$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     static readonly Regex Stamped = new(@"^((?:\[\d+:\d+(?:\.\d+)?\])+)(.*)$", RegexOptions.Compiled);
     static readonly Regex Stamp = new(@"\[(\d+):(\d+(?:\.\d+)?)\]", RegexOptions.Compiled);
@@ -36,52 +42,45 @@ sealed class LyricsService
     Line[] _stretched = None;
     double _stretchedFor;
     bool _reworked;
-    string _key = "";
-    int _version;
+    string _trackKey = "";
+    int _requestVersion;
 
-    /// <summary>Raised on the calling (UI) thread once the search for the track's lyrics has come back, with or without them.</summary>
     public event Action? Changed;
 
-    /// <summary>The search for the track's lyrics has not come back yet.</summary>
-    public bool Pending { get; private set; }
+    public bool IsPending { get; private set; }
 
-    /// <summary>Call from the UI thread whenever the track may have changed.</summary>
     public void Track(string title, string artist)
     {
         string key = title + "\n" + artist;
-        if (key == _key) return;
+        if (key == _trackKey) return;
 
-        _key = key;
+        _trackKey = key;
         _candidates = [];
         _stretchedFor = 0;
         _reworked = Reworked.IsMatch(title);
-        int version = ++_version;
-        Pending = title.Length > 0;
-        if (Pending) _ = LoadAsync(title, artist, version);
+        int version = ++_requestVersion;
+        IsPending = title.Length > 0;
+        if (IsPending) _ = LoadAsync(title, artist, version);
     }
 
-    /// <summary>Lines of the version whose length matches the playing one; empty when there is none.</summary>
-    public Line[] For(TimeSpan duration)
+    public Line[] LinesFor(TimeSpan duration)
     {
         double seconds = duration.TotalSeconds;
-        if (seconds < 1) return None; // no timeline, nothing to sync against
+        if (seconds < MinTimeline) return None;
 
         Line[] best = None;
-        double bestGap = Tolerance;
-        foreach (Candidate c in _candidates)
+        double bestGap = DurationTolerance;
+        foreach (Candidate candidate in _candidates)
         {
-            // LRCLIB is full of entries whose timings were copied from a longer cut (a video with an intro):
-            // the stated length matches, yet every line is late. Lines past the end of the track give them away.
-            if (c.End > seconds + 1) continue;
-            double gap = Math.Abs(c.Duration - seconds);
+            if (candidate.End > seconds + EndSlack) continue;
+            double gap = Math.Abs(candidate.Duration - seconds);
             if (gap > bestGap || (gap == bestGap && best.Length > 0)) continue;
-            best = c.Lines;
+            best = candidate.Lines;
             bestGap = gap;
         }
         if (best.Length > 0 || !_reworked) return best;
 
-        // a remix, sped up, slowed...: nobody timed that take, so the usual one is stretched over its length
-        if (Math.Abs(seconds - _stretchedFor) > 0.5)
+        if (Math.Abs(seconds - _stretchedFor) > RestretchAfter)
         {
             _stretched = Stretch(seconds);
             _stretchedFor = seconds;
@@ -89,34 +88,31 @@ sealed class LyricsService
         return _stretched;
     }
 
+    public TimeSpan UsualLength => _reworked ? TimeSpan.Zero : TimeSpan.FromSeconds(UsualCandidate()?.Duration ?? 0);
+
+    Candidate? UsualCandidate() => _candidates.Where(c => c.Duration >= MinUsualDuration && c.End <= c.Duration + EndSlack)
+        .GroupBy(c => Math.Round(c.Duration)).OrderByDescending(g => g.Count()).FirstOrDefault()?.First();
+
     Line[] Stretch(double seconds)
     {
-        // the usual version is the length most entries agree on
-        Candidate? usual = _candidates.Where(c => c.Duration >= 30 && c.End <= c.Duration + 1)
-            .GroupBy(c => Math.Round(c.Duration)).OrderByDescending(g => g.Count()).FirstOrDefault()?.First();
+        Candidate? usual = UsualCandidate();
         if (usual == null) return None;
 
         double ratio = seconds / usual.Duration;
-        if (ratio is < 0.5 or > 2) return None;
-        return Array.ConvertAll(usual.Lines, l => new Line(l.Time * ratio, l.Text));
+        if (ratio is < MinStretch or > MaxStretch) return None;
+        return Array.ConvertAll(usual.Lines, line => new Line(line.Time * ratio, line.Text));
     }
 
     async Task LoadAsync(string title, string artist, int version)
     {
         Candidate[] found = [];
-        try
-        {
-            found = await Task.Run(() => FetchAsync(title, artist));
-        }
-        catch
-        {
-            // offline or LRCLIB is down: the island simply shows no lyrics
-        }
-        if (version != _version) return;
+        try { found = await Task.Run(() => FetchAsync(title, artist)); }
+        catch { }
+        if (version != _requestVersion) return;
 
         _candidates = found;
         _stretchedFor = 0;
-        Pending = false;
+        IsPending = false;
         Changed?.Invoke();
     }
 
@@ -124,27 +120,28 @@ sealed class LyricsService
     {
         foreach (string query in Queries(title, artist))
         {
-            using JsonDocument? json = await GetAsync("https://lrclib.net/api/search?" + query);
+            using JsonDocument? json = await GetAsync(SearchUrl + query);
             if (json == null || json.RootElement.ValueKind != JsonValueKind.Array) continue;
 
-            var found = new List<Candidate>();
-            foreach (JsonElement item in json.RootElement.EnumerateArray())
-            {
-                if (!item.TryGetProperty("syncedLyrics", out JsonElement synced) || synced.ValueKind != JsonValueKind.String) continue;
-                if (!item.TryGetProperty("duration", out JsonElement duration) || duration.ValueKind != JsonValueKind.Number) continue;
-                Line[] lines = Parse(synced.GetString()!);
-                if (lines.Length == 0) continue;
-                double end = lines.LastOrDefault(l => l.Text.Length > 0).Time.TotalSeconds;
-                found.Add(new Candidate(duration.GetDouble(), end, lines));
-            }
-            if (found.Count > 0) return found.ToArray();
+            Candidate[] found = json.RootElement.EnumerateArray().Select(ToCandidate).OfType<Candidate>().ToArray();
+            if (found.Length > 0) return found;
         }
         return [];
     }
 
+    static Candidate? ToCandidate(JsonElement item)
+    {
+        if (!item.TryGetProperty("syncedLyrics", out JsonElement synced) || synced.ValueKind != JsonValueKind.String) return null;
+        if (!item.TryGetProperty("duration", out JsonElement duration) || duration.ValueKind != JsonValueKind.Number) return null;
+        Line[] lines = Parse(synced.GetString()!);
+        if (lines.Length == 0) return null;
+        double end = lines.LastOrDefault(line => line.Text.Length > 0).Time.TotalSeconds;
+        return new Candidate(duration.GetDouble(), end, lines);
+    }
+
     static async Task<JsonDocument?> GetAsync(string url)
     {
-        for (int attempt = 0; attempt < 2; attempt++)
+        for (int attempt = 0; attempt < Attempts; attempt++)
         {
             try
             {
@@ -153,12 +150,10 @@ sealed class LyricsService
             }
             catch (HttpRequestException)
             {
-                // LRCLIB answers 503 whenever it is busy; one more try is usually enough
-                if (attempt == 0) await Task.Delay(1500);
+                if (attempt + 1 < Attempts) await Task.Delay(RetryDelayMs);
             }
             catch (Exception ex) when (ex is TaskCanceledException or JsonException)
             {
-                // timed out, or the answer is not JSON: this query is given up, the next way of asking may still find it
                 return null;
             }
         }
@@ -173,12 +168,11 @@ sealed class LyricsService
 
         if (by.Length > 0) yield return $"track_name={Uri.EscapeDataString(song)}&artist_name={Uri.EscapeDataString(by)}";
 
-        // browser tabs: the title is "Artist - Song" and the artist is just the channel name
-        int dash = song.IndexOf(" - ", StringComparison.Ordinal);
+        int dash = song.IndexOf(TitleSeparator, StringComparison.Ordinal);
         if (dash > 0)
         {
-            yield return $"track_name={Uri.EscapeDataString(song[(dash + 3)..])}&artist_name={Uri.EscapeDataString(song[..dash])}";
-            yield return "q=" + Uri.EscapeDataString(song.Replace(" - ", " "));
+            yield return $"track_name={Uri.EscapeDataString(song[(dash + TitleSeparator.Length)..])}&artist_name={Uri.EscapeDataString(song[..dash])}";
+            yield return "q=" + Uri.EscapeDataString(song.Replace(TitleSeparator, " "));
         }
         else
         {
@@ -186,22 +180,20 @@ sealed class LyricsService
         }
     }
 
-    /// <summary>LRC: "[mm:ss.xx] text", possibly with several stamps in front of one line.</summary>
     static Line[] Parse(string lrc)
     {
         var lines = new List<Line>();
         foreach (string raw in lrc.Split('\n'))
         {
-            Match m = Stamped.Match(raw.Trim());
-            if (!m.Success) continue;
+            Match stamped = Stamped.Match(raw.Trim());
+            if (!stamped.Success) continue;
 
-            string text = m.Groups[2].Value.Trim();
-            foreach (Match stamp in Stamp.Matches(m.Groups[1].Value))
+            string text = stamped.Groups[2].Value.Trim();
+            foreach (Match stamp in Stamp.Matches(stamped.Groups[1].Value))
             {
-                // a stamp past what a number holds is a broken one: it is skipped, not the whole entry
                 if (!int.TryParse(stamp.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int minutes)
                     || !double.TryParse(stamp.Groups[2].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double rest)
-                    || minutes > 24 * 60) continue;
+                    || minutes > MaxMinutes) continue;
                 lines.Add(new Line(TimeSpan.FromSeconds(minutes * 60 + rest), text));
             }
         }

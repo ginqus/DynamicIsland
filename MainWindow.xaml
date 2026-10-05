@@ -14,13 +14,15 @@
         <SolidColorBrush x:Key="Green" Color="#30D158"/>
         <SolidColorBrush x:Key="Red" Color="#FF453A"/>
         <SolidColorBrush x:Key="Indigo" Color="#7D7AFF"/>
+        <SolidColorBrush x:Key="Faint" Color="#66FFFFFF"/>
+
+        <FontFamily x:Key="Display">./Fonts/#SF Pro Display, SF Pro Display, Segoe UI Variable Display, Segoe UI</FontFamily>
 
         <LinearGradientBrush x:Key="ArtPlaceholder" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#48484A" Offset="0"/>
             <GradientStop Color="#1C1C1E" Offset="1"/>
         </LinearGradientBrush>
 
-        <!-- round media button: soft hover disc + squish on press -->
         <Style x:Key="IconButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Foreground" Value="White"/>
@@ -86,8 +88,6 @@
             </Setter>
         </Style>
 
-        <!-- menu row: nothing but its content and a place to click. The highlight is the list's (RowList),
-             one for all the rows -->
         <Style x:Key="RowButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Foreground" Value="White"/>
@@ -105,9 +105,61 @@
             </Setter>
         </Style>
 
+        <Style x:Key="Caption" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource Faint}"/>
+        </Style>
+
+        <Style x:Key="BackButton" TargetType="Button" BasedOn="{StaticResource RowButton}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" Padding="12,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <local:Icon Kind="Back" Width="10" Height="10" Fill="{StaticResource Faint}" VerticalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource Caption}" Margin="6,0,0,0" VerticalAlignment="Center"
+                                           Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"/>
+                            </StackPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="RowIcon" TargetType="local:Icon">
+            <Setter Property="Width" Value="17"/>
+            <Setter Property="Height" Value="17"/>
+            <Setter Property="Fill" Value="{StaticResource Dim}"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="RowLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="29,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="RowChevron" TargetType="local:Icon">
+            <Setter Property="Kind" Value="Chevron"/>
+            <Setter Property="Width" Value="11"/>
+            <Setter Property="Height" Value="11"/>
+            <Setter Property="Fill" Value="{StaticResource Dim}"/>
+            <Setter Property="Margin" Value="0,1,0,0"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="RowSwitch" TargetType="local:Toggle">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+
         <local:ChipCorners x:Key="ChipCorners"/>
 
-        <!-- small filled pill: timer presets, and the start button with its own background -->
         <Style x:Key="ChipButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Foreground" Value="White"/>
@@ -164,7 +216,6 @@
             </Setter>
         </Style>
 
-        <!-- a place to click with nothing of its own drawn: its content says what it is -->
         <Style x:Key="PlainButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -179,7 +230,6 @@
             </Setter>
         </Style>
 
-        <!-- a colour to pick: a dot in its Background, with a ring around the one that is picked -->
         <Style x:Key="Swatch" TargetType="RadioButton">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Cursor" Value="Hand"/>
@@ -237,28 +287,27 @@
 
     </Window.Resources>
 
-    <!-- moved down by the gap to the top of the screen and scaled to the size picked in the menu: the island grows
-         down and sideways from the middle of its top edge. The window is made larger than this to hold it then -->
     <Grid x:Name="Root" Width="620" Height="410" Opacity="0"
           HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0.5,0"
           MouseLeftButtonDown="Root_MouseLeftButtonDown" MouseLeftButtonUp="Root_MouseLeftButtonUp"
+          MouseMove="Root_MouseMove"
           MouseRightButtonUp="Root_MouseRightButtonUp" MouseUp="Root_MouseUp" MouseWheel="Root_MouseWheel"
           AllowDrop="True" DragEnter="Root_DragOver" DragOver="Root_DragOver" DragLeave="Root_DragLeave" Drop="Root_Drop">
         <Grid.RenderTransform>
             <TransformGroup>
                 <TranslateTransform x:Name="RootMove"/>
+                <TranslateTransform x:Name="RootLean"/>
                 <ScaleTransform x:Name="RootSize"/>
             </TransformGroup>
         </Grid.RenderTransform>
 
-        <!-- the pill and everything in it: one piece under the pointer, scaled from its top centre -->
         <Grid x:Name="Island" RenderTransformOrigin="0.5,0"
-              MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
+              MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave"
+              LostMouseCapture="Island_LostMouseCapture">
             <Grid.RenderTransform>
                 <ScaleTransform x:Name="IslandScale"/>
             </Grid.RenderTransform>
 
-            <!-- in the body's own outline, which the code gives it -->
             <Path x:Name="Shadow" Fill="Black" Opacity="0" IsHitTestVisible="False"
                   HorizontalAlignment="Left" VerticalAlignment="Top">
                 <Path.Effect>
@@ -266,25 +315,18 @@
                 </Path.Effect>
             </Path>
 
-            <!-- the black itself, the bubble's included -->
             <local:Goo x:Name="Body" IsHitTestVisible="False"/>
 
-            <!-- what the pointer lands on -->
             <Border x:Name="Pill" Background="Transparent" HorizontalAlignment="Center" VerticalAlignment="Top"/>
 
-            <!-- every state lives here at its final size; the pill clip reveals it -->
             <Grid x:Name="Host">
 
-                <!-- idle: clock -->
                 <Grid x:Name="IdleView" Width="118" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:Digits x:Name="IdleClock" Text="00:00" FontSize="13.5" FontWeight="SemiBold"
                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
 
-                <!-- compact now-playing: the cover on its left and the bars on its right are the ones the toast and the
-                     player show too, kept in a layer of their own over the views -->
                 <Grid x:Name="MediaView" Width="210" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <!-- synced lyric line: long lines scroll sideways, both edges fade into the pill -->
                     <Canvas x:Name="LyricBox" Height="34" Margin="36,0,41,0"
                             Background="Transparent" ClipToBounds="True" IsHitTestVisible="False"
                             SizeChanged="LyricBox_SizeChanged">
@@ -311,16 +353,26 @@
                     </Canvas>
                 </Grid>
 
-                <!-- compact countdown -->
                 <Grid x:Name="TimerView" Width="132" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <local:Ring x:Name="TimerRing" Width="18" Height="18" Stroke="{StaticResource Orange}"
+                    <local:Ring x:Name="TimerRing" Width="18" Height="18"
                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="9,0,0,0"/>
                     <local:Digits x:Name="TimerText" Text="25:00" FontSize="13.5" FontWeight="SemiBold"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                </Grid>
+
+                <Grid x:Name="LoadingView" Width="118" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <local:Ring x:Name="LoadingRing" Width="18" Height="18" Progress="0" Stroke="{StaticResource Orange}"
+                                RenderTransformOrigin="0.5,0.5"
+                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="9,0,0,0">
+                        <local:Ring.RenderTransform>
+                            <ScaleTransform ScaleX="-1"/>
+                        </local:Ring.RenderTransform>
+                    </local:Ring>
+                    <local:Digits x:Name="LoadingText" Text="0%" FontSize="13.5" FontWeight="SemiBold"
                                   Foreground="{StaticResource Orange}"
                                   HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
                 </Grid>
 
-                <!-- volume HUD -->
                 <Grid x:Name="VolumeView" Width="250" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="42"/>
@@ -328,7 +380,6 @@
                         <ColumnDefinition/>
                     </Grid.ColumnDefinitions>
                     <local:Icon x:Name="VolIcon" Kind="Loud" Width="17" Height="17"/>
-                    <!-- pushed past either end, the bar stretches that way and springs back -->
                     <Grid x:Name="VolTrack" Grid.Column="1" Height="5" VerticalAlignment="Center">
                         <Grid.RenderTransform>
                             <ScaleTransform x:Name="VolStretch"/>
@@ -340,10 +391,8 @@
                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Grid>
 
-                <!-- charger plugged in -->
                 <Grid x:Name="ChargeView" Width="230" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <!-- the bolt strikes as the view comes in -->
-                    <local:Icon x:Name="ChargeBolt" Kind="Bolt" Width="16" Height="16" Fill="{StaticResource Green}"
+                    <local:Icon Kind="Bolt" Width="16" Height="16" Fill="{StaticResource Green}"
                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0"
                                 RenderTransformOrigin="0.5,0.5">
                         <local:Icon.RenderTransform>
@@ -359,16 +408,15 @@
                         <local:Digits x:Name="ChargeText" Text="100%" FontSize="13" FontWeight="SemiBold" Foreground="#30D158"
                                       VerticalAlignment="Center"/>
                         <Grid Width="27" Height="13" Margin="7,0,0,0" VerticalAlignment="Center">
-                            <Border Width="24" HorizontalAlignment="Left" CornerRadius="4" BorderBrush="#66FFFFFF" BorderThickness="1"/>
+                            <Border Width="24" HorizontalAlignment="Left" CornerRadius="4" BorderBrush="{StaticResource Faint}" BorderThickness="1"/>
                             <Border x:Name="ChargeFill" Width="20" Height="9" Margin="2,0,0,0" CornerRadius="2.5" Background="#30D158"
                                     HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                            <Border Width="2" Height="5" CornerRadius="0,1,1,0" Background="#66FFFFFF"
+                            <Border Width="2" Height="5" CornerRadius="0,1,1,0" Background="{StaticResource Faint}"
                                     HorizontalAlignment="Right" VerticalAlignment="Center"/>
                         </Grid>
                     </StackPanel>
                 </Grid>
 
-                <!-- "Do not disturb" turned on or off -->
                 <Grid x:Name="FocusView" Width="236" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:Icon x:Name="FocusIcon" Kind="Moon" Width="18" Height="18" Fill="{StaticResource Indigo}"
                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0"
@@ -386,7 +434,6 @@
                                HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,15,0"/>
                 </Grid>
 
-                <!-- track changed -->
                 <Grid x:Name="ToastView" Width="340" Height="68" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <StackPanel Margin="68,0,58,0" VerticalAlignment="Center">
                         <TextBlock x:Name="ToastTitle" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
@@ -395,10 +442,7 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- one-off notice: audio device, network, timer finished -->
                 <Grid x:Name="NoticeView" Width="320" Height="64" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <!-- the square takes a faint wash of the icon's colour, and each kind of notice brings its icon in
-                         in its own way: the code sets both -->
                     <Border x:Name="NoticeBack" Width="40" Height="40" CornerRadius="11" Background="#1FFFFFFF"
                             HorizontalAlignment="Left" Margin="12,0,0,0">
                         <local:Icon x:Name="NoticeIcon" Width="22" Height="22" RenderTransformOrigin="0.5,0.5">
@@ -418,13 +462,9 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- expanded player -->
                 <Grid x:Name="MediaBigView" Width="380" Height="176" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <!-- the view grows taller with lyrics (the code sets its height): the light and the controls keep
-                         to the bottom edge, the lyrics take the room that opens above them -->
                     <local:Aura x:Name="Glow" Height="176" VerticalAlignment="Bottom" IsHitTestVisible="False"/>
 
-                    <!-- between the cover and the bars -->
                     <Grid Height="64" Margin="20,20,22,0" VerticalAlignment="Top">
                         <StackPanel Margin="78,0,52,0" VerticalAlignment="Center">
                             <TextBlock x:Name="TitleBig" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
@@ -433,7 +473,6 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- synced lyrics: the line being sung in the middle, its neighbours fading out above and below -->
                     <Canvas x:Name="PlayerLyricBox" Width="340" Height="70" Margin="0,92,0,0" Opacity="0"
                             HorizontalAlignment="Center" VerticalAlignment="Top"
                             Background="Transparent" ClipToBounds="True" IsHitTestVisible="False">
@@ -445,13 +484,8 @@
                                 <GradientStop Color="#00000000" Offset="1"/>
                             </LinearGradientBrush>
                         </Canvas.OpacityMask>
-                        <!-- while the lyrics are looked up, faint lines with a sheen running through them hold their place -->
                         <local:Shimmer x:Name="PlayerLyricWait" Width="340" Height="70" Opacity="0"/>
-                        <Canvas x:Name="PlayerLyricLines">
-                            <Canvas.RenderTransform>
-                                <TranslateTransform x:Name="PlayerLyricMove"/>
-                            </Canvas.RenderTransform>
-                        </Canvas>
+                        <Canvas x:Name="PlayerLyricLines"/>
                     </Canvas>
 
                     <Grid Height="20" Margin="20,0,20,59" VerticalAlignment="Bottom">
@@ -460,26 +494,25 @@
                             <ColumnDefinition/>
                             <ColumnDefinition Width="40"/>
                         </Grid.ColumnDefinitions>
-                        <local:Digits x:Name="PosText" Text="0:00" FontSize="11" Foreground="{StaticResource Dim}" VerticalAlignment="Center"/>
+                        <local:Digits x:Name="PosText" Text="–:––" FontSize="11" Foreground="{StaticResource Dim}" VerticalAlignment="Center"/>
                         <Border x:Name="SeekArea" Grid.Column="1" Background="Transparent" Cursor="Hand"
                                 MouseLeftButtonDown="Seek_MouseLeftButtonDown" MouseMove="Seek_MouseMove"
                                 MouseLeftButtonUp="Seek_MouseLeftButtonUp" LostMouseCapture="Seek_LostMouseCapture">
                             <Grid x:Name="SeekBar" Height="6" VerticalAlignment="Center">
                                 <Border x:Name="SeekBack" CornerRadius="3" Background="#33FFFFFF"/>
                                 <Border x:Name="SeekFill" CornerRadius="3" Background="White" HorizontalAlignment="Left" Width="0"/>
+                                <local:LineBar x:Name="SeekLines" Opacity="0"/>
                             </Grid>
                         </Border>
-                        <local:Digits x:Name="RemText" Grid.Column="2" Text="-0:00" FontSize="11" Foreground="{StaticResource Dim}"
+                        <local:Digits x:Name="RemText" Grid.Column="2" Text="–:––" FontSize="11" Foreground="{StaticResource Dim}"
                                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8">
                         <Button Style="{StaticResource IconButton}" Click="Prev_Click">
-                            <Path Data="M22,1 L12,7.5 L22,14 Z M11,1 L1,7.5 L11,14 Z" Fill="White" Stroke="White"
-                                  StrokeThickness="2" StrokeLineJoin="Round"/>
+                            <local:Skip x:Name="PrevIcon" Back="True"/>
                         </Button>
                         <Button Style="{StaticResource IconButton}" Width="52" Height="52" Margin="16,0" Click="Play_Click">
-                            <!-- the two trade places: one shrinks away as the other comes in -->
                             <Grid>
                                 <Path x:Name="PlayIcon" Data="M2,1 L16,10 L2,19 Z" Fill="White" Stroke="White" Margin="4,0,0,0"
                                       StrokeThickness="2.5" StrokeLineJoin="Round"/>
@@ -488,12 +521,10 @@
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource IconButton}" Click="Next_Click">
-                            <Path Data="M1,1 L11,7.5 L1,14 Z M12,1 L22,7.5 L12,14 Z" Fill="White" Stroke="White"
-                                  StrokeThickness="2" StrokeLineJoin="Round"/>
+                            <local:Skip x:Name="NextIcon"/>
                         </Button>
                     </StackPanel>
 
-                    <!-- charge of the Bluetooth headphones the sound goes to, level with the buttons -->
                     <StackPanel x:Name="PlayerHeadset" Orientation="Horizontal" Height="52" Margin="0,0,20,8"
                                 HorizontalAlignment="Right" VerticalAlignment="Bottom" IsHitTestVisible="False"
                                 Visibility="Collapsed">
@@ -502,8 +533,6 @@
                         <local:Digits x:Name="PlayerHeadsetText" FontSize="11" Foreground="{StaticResource Dim}" Margin="5,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- the volume the wheel has just moved, across from the headphones: it comes up and fades.
-                         A note for the app that plays, the speaker for the whole system -->
                     <StackPanel x:Name="PlayerVolume" Orientation="Horizontal" Height="52" Margin="20,0,0,8"
                                 HorizontalAlignment="Left" VerticalAlignment="Bottom" IsHitTestVisible="False"
                                 Opacity="0">
@@ -513,14 +542,12 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- expanded, nothing playing -->
                 <Grid x:Name="IdleBigView" Width="320" Height="124" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <StackPanel Margin="26,0,0,2" HorizontalAlignment="Left" VerticalAlignment="Center">
                         <local:Digits x:Name="BigClock" Text="00:00" FontSize="46" FontWeight="SemiBold"
-                                      FontFamily="./Fonts/#SF Pro Display, SF Pro Display, Segoe UI Variable Display, Segoe UI"/>
+                                      FontFamily="{StaticResource Display}"/>
                         <StackPanel Orientation="Horizontal" Margin="2,-4,0,0">
                             <TextBlock x:Name="BigDate" FontSize="13" Foreground="{StaticResource Dim}"/>
-                            <!-- next to the date while "Do not disturb" is on, as on a locked phone -->
                             <local:Icon x:Name="InfoFocus" Kind="Moon" Width="13" Height="13" Fill="{StaticResource Indigo}"
                                         Margin="6,1,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                         </StackPanel>
@@ -549,20 +576,16 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- expanded countdown -->
                 <Grid x:Name="TimerBigView" Width="330" Height="92" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="20,0,0,0">
                         <Button Style="{StaticResource IconButton}" Width="50" Height="50" Click="TimerToggle_Click">
                             <Grid Width="50" Height="50">
-                                <!-- what is left of the countdown runs round the button -->
-                                <local:Ring x:Name="BigRing" Thickness="3" Stroke="{StaticResource Orange}" RenderTransformOrigin="0.5,0.5"/>
-                                <Ellipse x:Name="TimerDisc" Margin="6" Fill="{StaticResource Orange}" Opacity="0.25"/>
+                                <local:Ring x:Name="BigRing" Thickness="3" RenderTransformOrigin="0.5,0.5"/>
+                                <Ellipse x:Name="TimerDisc" Margin="6" Opacity="0.25"/>
                                 <Path x:Name="TimerPauseIcon" Data="M1,1 H5 V15 H1 Z M10,1 H14 V15 H10 Z"
-                                      Fill="{StaticResource Orange}" Stroke="{StaticResource Orange}"
                                       StrokeThickness="2" StrokeLineJoin="Round"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 <Path x:Name="TimerPlayIcon" Data="M2,1 L13,8 L2,15 Z" Margin="3,0,0,0" Opacity="0"
-                                      Fill="{StaticResource Orange}" Stroke="{StaticResource Orange}"
                                       StrokeThickness="2" StrokeLineJoin="Round"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Grid>
@@ -577,26 +600,23 @@
                         </Button>
                     </StackPanel>
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,26,2">
-                        <TextBlock x:Name="BigTimerLabel" Text="Таймер" FontSize="12" Foreground="{StaticResource Orange}"
+                        <TextBlock x:Name="BigTimerLabel" Text="Таймер" FontSize="12"
                                    Opacity="0.8" HorizontalAlignment="Right"/>
                         <local:Digits x:Name="BigTimer" Text="25:00" FontSize="40" FontWeight="SemiBold"
-                                      FontFamily="./Fonts/#SF Pro Display, SF Pro Display, Segoe UI Variable Display, Segoe UI"
-                                      Foreground="{StaticResource Orange}"
+                                      FontFamily="{StaticResource Display}"
                                       HorizontalAlignment="Right" Margin="0,-4,0,0"/>
                     </StackPanel>
                 </Grid>
 
-                <!-- new countdown: −/+, a preset or the mouse wheel sets the minutes -->
                 <Grid x:Name="TimerSetView" Width="300" Height="190" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <StackPanel Margin="14,14,14,0">
-                        <TextBlock Text="ТАЙМЕР" FontSize="10.5" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                   Margin="8,0,0,0"/>
+                        <TextBlock Style="{StaticResource Caption}" Text="ТАЙМЕР" Margin="8,0,0,0"/>
                         <Grid Height="56">
                             <Button Style="{StaticResource IconButton}" HorizontalAlignment="Left" Click="TimerLess_Click">
                                 <local:Icon Kind="Minus" Width="16" Height="16"/>
                             </Button>
                             <local:Digits x:Name="SetupText" Text="25:00" FontSize="38" FontWeight="SemiBold"
-                                          FontFamily="./Fonts/#SF Pro Display, SF Pro Display, Segoe UI Variable Display, Segoe UI"
+                                          FontFamily="{StaticResource Display}"
                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Click="TimerMore_Click">
                                 <local:Icon Kind="Plus" Width="16" Height="16"/>
@@ -615,103 +635,82 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- right-click menu -->
                 <Grid x:Name="MenuView" Width="300" Height="248" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,14,10,0">
-                        <TextBlock Text="DYNAMIC ISLAND" FontSize="10.5" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                   Margin="12,0,0,6"/>
+                        <TextBlock Style="{StaticResource Caption}" Text="DYNAMIC ISLAND" Margin="12,0,0,6"/>
                         <Button Style="{StaticResource RowButton}" Click="TimerRow_Click">
                             <Grid>
-                                <local:Icon Kind="Clock" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Таймер" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Clock"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Таймер"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                    <local:Digits x:Name="MenuTimer" Foreground="{StaticResource Orange}" VerticalAlignment="Center"/>
-                                    <local:Icon Kind="Chevron" Width="11" Height="11"
-                                                Fill="{StaticResource Dim}" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                                    <local:Digits x:Name="MenuTimer" VerticalAlignment="Center"/>
+                                    <local:Icon Style="{StaticResource RowChevron}" Margin="8,1,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="ShelfRow_Click">
                             <Grid>
-                                <local:Icon Kind="Tray" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Полка" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Tray"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Полка"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <local:Digits x:Name="MenuShelf" Foreground="{StaticResource Dim}" VerticalAlignment="Center"/>
-                                    <local:Icon Kind="Chevron" Width="11" Height="11"
-                                                Fill="{StaticResource Dim}" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                                    <local:Icon Style="{StaticResource RowChevron}" Margin="8,1,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="SettingsRow_Click">
                             <Grid>
-                                <local:Icon Kind="Gear" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Настройки" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Icon Kind="Chevron" Width="11" Height="11" Fill="{StaticResource Dim}"
-                                            Margin="0,1,0,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Gear"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Настройки"/>
+                                <local:Icon Style="{StaticResource RowChevron}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="LookRow_Click">
                             <Grid>
-                                <local:Icon Kind="Look" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Оформление" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Icon Kind="Chevron" Width="11" Height="11" Fill="{StaticResource Dim}"
-                                            Margin="0,1,0,0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Look"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Оформление"/>
+                                <local:Icon Style="{StaticResource RowChevron}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Exit_Click">
                             <Grid>
-                                <local:Icon Kind="Power" Width="17" Height="17" Fill="{StaticResource Red}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Закрыть остров" Foreground="{StaticResource Red}" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Power" Fill="{StaticResource Red}"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Закрыть остров" Foreground="{StaticResource Red}"/>
                             </Grid>
                         </Button>
                     </local:RowList>
                 </Grid>
 
                 <!-- its second page: the switches. The heading leads back -->
-                <Grid x:Name="SettingsView" Width="320" Height="374" HorizontalAlignment="Center" VerticalAlignment="Top">
+                <Grid x:Name="SettingsView" Width="320" Height="414" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,8,10,0">
-                        <Button Style="{StaticResource RowButton}" Height="32" Margin="0,0,0,2" Click="SettingsBack_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <local:Icon Kind="Back" Width="10" Height="10" Fill="#66FFFFFF" VerticalAlignment="Center"/>
-                                <TextBlock Text="НАСТРОЙКИ" FontSize="10.5" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                           Margin="6,0,0,0" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
+                        <Button Style="{StaticResource BackButton}" Content="НАСТРОЙКИ" Click="SettingsBack_Click"/>
                         <Button Style="{StaticResource RowButton}" Click="Lyrics_Click">
                             <Grid>
-                                <local:Icon Kind="Lines" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Текст песен" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="LyricsSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Lines"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Текст песен"/>
+                                <local:Toggle x:Name="LyricsSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="LyricEffects_Click">
                             <Grid>
-                                <local:Icon Kind="Sparkle" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Эффекты текста" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="LyricEffectsSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Sparkle"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Эффекты текста"/>
+                                <local:Toggle x:Name="LyricEffectsSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Rim_Click">
                             <Grid>
-                                <local:Icon Kind="Rim" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Цветной ободок" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="RimSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Rim"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Цветной ободок"/>
+                                <local:Toggle x:Name="RimSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="AppVolume_Click">
                             <Grid>
-                                <local:Icon Kind="Mid" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Громкость приложения" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="AppVolumeSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Mid"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Громкость приложения"/>
+                                <local:Toggle x:Name="AppVolumeSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="AppSpectrum_Click">
@@ -724,78 +723,114 @@
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Network_Click">
                             <Grid>
-                                <local:Icon Kind="Wifi" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Уведомления о сети" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="NetworkSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Wifi"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Уведомления о сети"/>
+                                <local:Toggle x:Name="NetworkSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Fullscreen_Click">
                             <Grid>
-                                <local:Icon Kind="Expand" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Скрывать на полном экране" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="FullscreenSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Expand"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Скрывать на полном экране"/>
+                                <local:Toggle x:Name="FullscreenSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Autostart_Click">
                             <Grid>
-                                <local:Icon Kind="Windows" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Запускать с Windows" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="AutostartSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Windows"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Запускать с Windows"/>
+                                <local:Toggle x:Name="AutostartSwitch" Style="{StaticResource RowSwitch}"/>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource RowButton}" Click="UpdateRow_Click">
+                            <Grid>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Update"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Обновление"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock x:Name="UpdateText" Foreground="{StaticResource Dim}" VerticalAlignment="Center"/>
+                                    <local:Icon Style="{StaticResource RowChevron}" Margin="8,1,0,0"/>
+                                </StackPanel>
                             </Grid>
                         </Button>
                     </local:RowList>
                 </Grid>
 
-                <!-- its third: how the island looks. A click on a row steps to its next value and the wheel goes
-                     both ways; the colours are picked straight from the strip -->
-                <Grid x:Name="LookView" Width="320" Height="248" HorizontalAlignment="Center" VerticalAlignment="Top">
+                <Grid x:Name="UpdatePage" Width="320" Height="150" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <StackPanel x:Name="UpdateBody" Margin="10,8,10,0" VerticalAlignment="Top">
+                        <local:RowList>
+                            <Button Style="{StaticResource BackButton}" Content="ОБНОВЛЕНИЕ" Click="UpdateBack_Click"/>
+                        </local:RowList>
+                        <StackPanel Orientation="Horizontal" Margin="12,2,12,0">
+                            <TextBlock x:Name="UpdateVersion" FontSize="30" FontWeight="SemiBold" Foreground="White"
+                                       FontFamily="{StaticResource Display}"/>
+                            <TextBlock x:Name="UpdateFrom" FontSize="13.5" Foreground="{StaticResource Dim}"
+                                       Margin="9,0,0,5" VerticalAlignment="Bottom"/>
+                        </StackPanel>
+                        <StackPanel x:Name="UpdateNotes" Margin="12,10,12,0">
+                            <TextBlock Style="{StaticResource Caption}" Text="ЧТО НОВОГО"/>
+                            <TextBlock x:Name="UpdateNotesText" FontSize="12.5" Foreground="{StaticResource Dim}" Margin="0,5,0,0"
+                                       TextWrapping="Wrap" LineHeight="18" LineStackingStrategy="BlockLineHeight"/>
+                        </StackPanel>
+                        <Grid Height="36" Margin="4,14,4,0">
+                            <Button x:Name="UpdateButton" Style="{StaticResource ChipButton}" Height="36" Margin="0"
+                                    FontSize="13.5" FontWeight="SemiBold" Click="Update_Click"/>
+                            <Grid x:Name="UpdateLoad" Margin="8,0" Visibility="Collapsed">
+                                <local:Ring x:Name="UpdateRing" Width="22" Height="22" Thickness="3" Progress="0"
+                                            Stroke="{StaticResource Orange}" RenderTransformOrigin="0.5,0.5"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center">
+                                    <local:Ring.RenderTransform>
+                                        <ScaleTransform ScaleX="-1"/>
+                                    </local:Ring.RenderTransform>
+                                </local:Ring>
+                                <TextBlock Text="Скачиваю" FontSize="13.5" Foreground="White" Margin="34,0,0,0" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="UpdateBytes" FontSize="13.5" Foreground="{StaticResource Dim}"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+
+                <Grid x:Name="LookView" Width="320" Height="288" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,8,10,0">
-                        <Button Style="{StaticResource RowButton}" Height="32" Margin="0,0,0,2" Click="SettingsBack_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <local:Icon Kind="Back" Width="10" Height="10" Fill="#66FFFFFF" VerticalAlignment="Center"/>
-                                <TextBlock Text="ОФОРМЛЕНИЕ" FontSize="10.5" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                           Margin="6,0,0,0" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
+                        <Button Style="{StaticResource BackButton}" Content="ОФОРМЛЕНИЕ" Click="SettingsBack_Click"/>
                         <Button x:Name="SizeRow" Style="{StaticResource RowButton}" Click="Size_Click">
                             <Grid>
-                                <local:Icon Kind="Size" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Размер" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Size"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Размер"/>
                                 <local:Digits x:Name="SizeText" Foreground="{StaticResource Dim}"
                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </Grid>
                         </Button>
                         <Button x:Name="GapRow" Style="{StaticResource RowButton}" Click="Gap_Click">
                             <Grid>
-                                <local:Icon Kind="Gap" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Отступ от края" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Gap"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Отступ от края"/>
                                 <local:Digits x:Name="GapText" Foreground="{StaticResource Dim}"
                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </Grid>
                         </Button>
-                        <!-- how brightly the edge lights up on the bass of the music -->
-                        <Button x:Name="PulseRow" Style="{StaticResource RowButton}" Click="Pulse_Click">
+                        <Button Style="{StaticResource RowButton}" Click="Dots_Click">
                             <Grid>
-                                <local:Icon Kind="Pulse" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                            HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                                <TextBlock Text="Пульс ободка" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="PulseText" Foreground="{StaticResource Dim}"
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Bars"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Эквалайзер"/>
+                                <TextBlock x:Name="DotsText" Foreground="{StaticResource Dim}"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource RowButton}" Click="SeekStyle_Click">
+                            <Grid>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Segments"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Полоса трека"/>
+                                <TextBlock x:Name="SeekStyleText" Foreground="{StaticResource Dim}"
                                            HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </Grid>
                         </Button>
                         <Grid Height="40" Margin="12,0">
-                            <local:Icon Kind="Drop" Width="17" Height="17" Fill="{StaticResource Dim}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                            <TextBlock Text="Акцентный цвет" FontSize="13.5" Margin="29,0,0,0" VerticalAlignment="Center"/>
+                            <local:Icon Style="{StaticResource RowIcon}" Kind="Drop"/>
+                            <TextBlock Style="{StaticResource RowLabel}" Text="Акцентный цвет" FontSize="13.5"/>
                             <TextBlock x:Name="AccentText" FontSize="13.5" Foreground="{StaticResource Dim}"
                                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
                         </Grid>
-                        <!-- the first leaves the colour to the cover -->
                         <UniformGrid x:Name="AccentStrip" Rows="1" Height="30" Margin="8,0">
                             <RadioButton Style="{StaticResource Swatch}" Tag="Из обложки" Click="Accent_Click">
                                 <RadioButton.Background>
@@ -820,14 +855,10 @@
                     </local:RowList>
                 </Grid>
 
-                <!-- the shelf: files put down on the island, to be dragged out somewhere else. A file dragged over the
-                     island opens it, the place to drop it outlined -->
                 <Grid x:Name="ShelfView" Width="380" Height="136" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <Grid Height="22" Margin="22,12,16,0" VerticalAlignment="Top">
-                        <TextBlock Text="ПОЛКА" FontSize="10.5" FontWeight="SemiBold" Foreground="#66FFFFFF"
-                                   VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource Caption}" Text="ПОЛКА" VerticalAlignment="Center"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <!-- files picked from the computer, for when there is nothing at hand to drag -->
                             <Button Style="{StaticResource ChipButton}" Width="22" Height="22" Margin="0,0,6,0" Click="ShelfAdd_Click">
                                 <local:Icon Kind="Plus" Width="12" Height="12" Fill="{StaticResource Dim}"/>
                             </Button>
@@ -840,20 +871,17 @@
                     <Rectangle x:Name="ShelfZone" Margin="14,40,14,12" RadiusX="16" RadiusY="16"
                                Stroke="White" StrokeThickness="1.5" StrokeDashArray="3 2.5" Fill="#0AFFFFFF" Opacity="0"
                                IsHitTestVisible="False"/>
-                    <!-- the empty shelf is one place to click: it opens the files of the computer -->
                     <Button x:Name="ShelfHint" Style="{StaticResource PlainButton}" Margin="14,40,14,12" Click="ShelfAdd_Click"
                             MouseEnter="ShelfHint_MouseHover" MouseLeave="ShelfHint_MouseHover">
                         <StackPanel>
                             <local:Icon Kind="Tray" Width="22" Height="22" Fill="{StaticResource Dim}"/>
                             <TextBlock x:Name="ShelfHintText" Text="Перетащите сюда файлы" FontSize="12" Foreground="{StaticResource Dim}"
                                        Margin="0,6,0,0" HorizontalAlignment="Center"/>
-                            <TextBlock x:Name="ShelfHintMore" Text="или нажмите, чтобы выбрать" FontSize="11" Foreground="#66FFFFFF"
+                            <TextBlock x:Name="ShelfHintMore" Text="или нажмите, чтобы выбрать" FontSize="11" Foreground="{StaticResource Faint}"
                                        Margin="0,1,0,0" HorizontalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-                    <!-- room above the tiles for the crosses on their corners; more than fit are scrolled by the wheel -->
                     <Border x:Name="ShelfStrip" Margin="18,36,18,10" ClipToBounds="True">
-                        <!-- the row fades out at an end it goes on past -->
                         <Border.OpacityMask>
                             <LinearGradientBrush MappingMode="Absolute" StartPoint="0,0" EndPoint="344,0">
                                 <GradientStop x:Name="ShelfEdgeLeft" Color="Black" Offset="0"/>
@@ -862,8 +890,6 @@
                                 <GradientStop x:Name="ShelfEdgeRight" Color="Black" Offset="1"/>
                             </LinearGradientBrush>
                         </Border.OpacityMask>
-                        <!-- the canvas lets the row be as long as it is: laid out in the strip alone, it would be cut to the
-                             strip's width before the wheel moves it, and the tiles past the fifth never seen -->
                         <Canvas>
                             <StackPanel x:Name="ShelfTiles" Orientation="Horizontal" Margin="0,8,0,0">
                                 <StackPanel.RenderTransform>
@@ -875,12 +901,7 @@
                 </Grid>
             </Grid>
 
-            <!-- the cover and the bars of the music. The pill, the toast and the player each leave a place for them, and
-                 these are the same two in all three: from one view to the next they do not fade out and come back, they
-                 move over and grow or shrink, on springs like the pill's own. Cut to the pill as the views are -->
             <Canvas x:Name="Shared" Visibility="Collapsed" Opacity="0">
-                <!-- laid out at the size the player shows it and scaled down for the others; in the player it leads to
-                     the app that plays -->
                 <Grid x:Name="ArtSpot" Width="64" Height="64" MouseLeftButtonUp="Art_MouseLeftButtonUp">
                     <Grid.RenderTransform>
                         <TransformGroup>
@@ -901,10 +922,6 @@
             </Canvas>
         </Grid>
 
-        <!-- a second activity (the timer, while the pill is busy with something else) splits off into its own
-             bubble: it starts inside the pill's right end and is pulled out of it. Its black is part of the
-             body the island draws, this is what it shows. It answers the pointer on its own, growing away
-             from the pill so the gap between them holds -->
         <Border x:Name="Bubble" Width="78" Height="34" CornerRadius="17" Visibility="Collapsed"
                 Background="Transparent" Padding="1"
                 HorizontalAlignment="Center" VerticalAlignment="Top" RenderTransformOrigin="0,0"
@@ -916,13 +933,11 @@
                     <TranslateTransform x:Name="BubbleMove"/>
                 </TransformGroup>
             </Border.RenderTransform>
-            <!-- it carries the timer, the shelf or both side by side; the code sets its width to what it carries -->
             <Grid x:Name="BubbleBody" ClipToBounds="True">
                 <Grid x:Name="BubbleTimer" Width="76" HorizontalAlignment="Left">
-                    <local:Ring x:Name="BubbleRing" Width="16" Height="16" Stroke="{StaticResource Orange}"
+                    <local:Ring x:Name="BubbleRing" Width="16" Height="16"
                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     <local:Digits x:Name="BubbleText" Text="25:00" FontSize="12.5" FontWeight="SemiBold"
-                                  Foreground="{StaticResource Orange}"
                                   HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 </Grid>
                 <StackPanel x:Name="BubbleShelf" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"

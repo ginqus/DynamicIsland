@@ -4,55 +4,45 @@ using System.Windows.Media.Animation;
 
 namespace DynamicIsland;
 
-/// <summary>
-/// Stands in for the lyrics while they are looked up: three faint lines where theirs will be, with a sheen in the
-/// colours of the cover sliding across them at a slant, so each row catches the light a moment after the one above.
-/// </summary>
 public sealed class Shimmer : FrameworkElement
 {
-    const double Row = 18, Gap = 4, Bar = 10; // the rows of the lyrics, and how thick a line of them is drawn
-    const double Band = 170;                  // width of the sheen
-    const double Slant = 0.35;                // how far it leans: each row lower is lit this much of a row later
-    static readonly TimeSpan Pass = TimeSpan.FromSeconds(1.5), Rest = TimeSpan.FromSeconds(0.6);
+    const double RowHeight = 18, RowGap = 4, BarHeight = 10;
+    const double SheenWidth = 170;
+    const double Slant = 0.35;
+    const double Whitening = 0.35;
+    static readonly TimeSpan SweepTime = TimeSpan.FromSeconds(1.5), PauseTime = TimeSpan.FromSeconds(0.6);
 
-    // the line being sung in the middle, its neighbours shorter and dimmer: (share of the width, opacity)
-    static readonly (double Width, double Alpha)[] Rows = { (0.58, 0.55), (0.84, 1), (0.42, 0.55) };
+    static readonly (double Width, double Alpha)[] Rows = [(0.58, 0.55), (0.84, 1), (0.42, 0.55)];
+    static readonly double[] StopOffsets = [0, 0.3, 0.5, 0.7, 1];
+    static readonly double RowsHeight = Rows.Length * RowHeight + (Rows.Length - 1) * RowGap;
 
     readonly SolidColorBrush _base = new(Color.FromArgb(26, 255, 255, 255));
     readonly LinearGradientBrush _sheen;
-    readonly TranslateTransform _move = new();
+    readonly TranslateTransform _move = new() { X = -SheenWidth * 2 };
     bool _running;
 
     public Shimmer()
     {
-        // across the band: nothing, the cover's colour, nearly white at the crest, its second colour, nothing
         _sheen = new LinearGradientBrush
         {
             MappingMode = BrushMappingMode.Absolute,
             StartPoint = new Point(0, 0),
-            EndPoint = new Point(Band, Band * Slant),
+            EndPoint = new Point(SheenWidth, SheenWidth * Slant),
             Transform = _move,
         };
-        foreach (var (color, offset) in new[]
-                 {
-                     (Colors.Transparent, 0.0), (Fade(Colors.White, 0.35), 0.3), (Fade(Colors.White, 0.8), 0.5),
-                     (Fade(Colors.White, 0.35), 0.7), (Colors.Transparent, 1.0),
-                 })
-            _sheen.GradientStops.Add(new GradientStop(color, offset));
-        _move.X = -Band * 2;
+        Color[] colors = Sheen(Colors.White.WithAlpha(0.35), Colors.White.WithAlpha(0.8), Colors.White.WithAlpha(0.35));
+        for (int i = 0; i < colors.Length; i++) _sheen.GradientStops.Add(new GradientStop(colors[i], StopOffsets[i]));
     }
 
-    /// <summary>Turns the sheen to the colours of another cover, lifted towards white so it reads as light on the black.</summary>
     public void Tint(IReadOnlyList<Color> colors, Duration time)
     {
-        Color a = Lift(colors[0]), b = Lift(colors[Math.Min(1, colors.Count - 1)]);
-        Color[] stops = { Colors.Transparent, Fade(a, 0.45), Fade(Mix(a, Colors.White, 0.6), 0.85), Fade(b, 0.45), Colors.Transparent };
+        Color first = Whiten(colors[0], Whitening), second = Whiten(colors[Math.Min(1, colors.Count - 1)], Whitening);
+        Color[] stops = Sheen(first.WithAlpha(0.45), Whiten(first, 0.6).WithAlpha(0.85), second.WithAlpha(0.45));
         for (int i = 0; i < stops.Length; i++)
             _sheen.GradientStops[i].BeginAnimation(GradientStop.ColorProperty, new ColorAnimation(stops[i], time));
     }
 
-    /// <summary>Sets the sheen going, or stops it: it only costs frames while there is something to wait for.</summary>
-    public void Run(bool on)
+    public void SetRunning(bool on)
     {
         if (on == _running) return;
         _running = on;
@@ -62,39 +52,35 @@ public sealed class Shimmer : FrameworkElement
             return;
         }
 
-        // from out of sight on the left to out of sight on the right, then a breath before the next pass
-        double from = -Band - Rows.Length * (Row + Gap) * Slant, to = (double.IsNaN(Width) ? ActualWidth : Width) + Band;
-        var sweep = new DoubleAnimationUsingKeyFrames { Duration = Pass + Rest, RepeatBehavior = RepeatBehavior.Forever };
+        double from = -SheenWidth - Rows.Length * (RowHeight + RowGap) * Slant;
+        double to = (double.IsNaN(Width) ? ActualWidth : Width) + SheenWidth;
+        var sweep = new DoubleAnimationUsingKeyFrames { Duration = SweepTime + PauseTime, RepeatBehavior = RepeatBehavior.Forever };
         sweep.KeyFrames.Add(new DiscreteDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-        sweep.KeyFrames.Add(new EasingDoubleKeyFrame(to, KeyTime.FromTimeSpan(Pass), new SineEase { EasingMode = EasingMode.EaseInOut }));
-        sweep.KeyFrames.Add(new DiscreteDoubleKeyFrame(to, KeyTime.FromTimeSpan(Pass + Rest)));
+        sweep.KeyFrames.Add(new EasingDoubleKeyFrame(to, KeyTime.FromTimeSpan(SweepTime), new SineEase { EasingMode = EasingMode.EaseInOut }));
+        sweep.KeyFrames.Add(new DiscreteDoubleKeyFrame(to, KeyTime.FromTimeSpan(SweepTime + PauseTime)));
         _move.BeginAnimation(TranslateTransform.XProperty, sweep);
     }
 
     protected override Size MeasureOverride(Size available) =>
-        new(double.IsInfinity(available.Width) ? 0 : available.Width, Rows.Length * Row + (Rows.Length - 1) * Gap);
+        new(double.IsInfinity(available.Width) ? 0 : available.Width, RowsHeight);
 
     protected override void OnRender(DrawingContext dc)
     {
-        double w = ActualWidth, top = (ActualHeight - (Rows.Length * Row + (Rows.Length - 1) * Gap)) / 2;
+        double w = ActualWidth, top = (ActualHeight - RowsHeight) / 2;
         if (w <= 0) return;
 
         for (int i = 0; i < Rows.Length; i++)
         {
-            var bar = new Rect(0, top + i * (Row + Gap) + (Row - Bar) / 2, Math.Round(w * Rows[i].Width), Bar);
+            var bar = new Rect(0, top + i * (RowHeight + RowGap) + (RowHeight - BarHeight) / 2, Math.Round(w * Rows[i].Width), BarHeight);
             dc.PushOpacity(Rows[i].Alpha);
-            // the sheen is laid over the whole box, so it runs through the rows as one slanted band
-            dc.DrawRoundedRectangle(_base, null, bar, Bar / 2, Bar / 2);
-            dc.DrawRoundedRectangle(_sheen, null, bar, Bar / 2, Bar / 2);
+            dc.DrawRoundedRectangle(_base, null, bar, BarHeight / 2, BarHeight / 2);
+            dc.DrawRoundedRectangle(_sheen, null, bar, BarHeight / 2, BarHeight / 2);
             dc.Pop();
         }
     }
 
-    static Color Fade(Color c, double alpha) => Color.FromArgb((byte)(255 * alpha), c.R, c.G, c.B);
+    static Color[] Sheen(Color rise, Color crest, Color fall) => [Colors.Transparent, rise, crest, fall, Colors.Transparent];
 
-    static Color Mix(Color a, Color b, double t) => Color.FromRgb(
-        (byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
-
-    // a dark cover still gives a sheen that shows
-    static Color Lift(Color c) => Mix(c, Colors.White, 0.35);
+    static Color Whiten(Color color, double share) => Color.FromRgb(
+        (byte)(color.R + (255 - color.R) * share), (byte)(color.G + (255 - color.G) * share), (byte)(color.B + (255 - color.B) * share));
 }
