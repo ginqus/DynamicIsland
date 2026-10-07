@@ -2,7 +2,7 @@
 
 <h1>Dynamic Island для Windows</h1>
 
-<p>Остров в духе iPhone у верхнего края экрана: показывает, что играет, громкость, таймер, запись OBS и системные события,<br>а по клику раскрывается в плеер.</p>
+<p>Остров в духе iPhone у верхнего края экрана: музыка с текстом песен, таймер, запись OBS, полка для файлов и системные уведомления. По клику раскрывается в плеер.</p>
 
 <p>
   <a href="https://github.com/mihailkotovski/DynamicIsland/releases/latest"><img alt="Релиз" src="https://img.shields.io/github/v/release/mihailkotovski/DynamicIsland?style=flat-square&label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7&color=111111"></a>
