@@ -33,7 +33,7 @@ sealed class ObsService
     readonly SemaphoreSlim _sending = new(1, 1);
     readonly Stopwatch _sinceStatus = new();
     ClientWebSocket? _socket;
-    string? _refusedPassword, _triedPassword;
+    string? _refusedPassword, _triedPassword, _recordFile;
     TimeSpan _statusDuration;
     bool _connecting;
     int _ticks, _requests;
@@ -241,6 +241,9 @@ sealed class ObsService
             case "RecordStateChanged":
                 OnRecordState(data.GetProperty("outputState").GetString(), data.TryGetProperty("outputPath", out JsonElement path) ? path.GetString() : null);
                 break;
+            case "RecordFileChanged":
+                _recordFile = data.TryGetProperty("newOutputPath", out JsonElement next) ? next.GetString() : null;
+                break;
             case "CurrentProgramSceneChanged":
                 Scene = data.GetProperty("sceneName").GetString() ?? "";
                 Changed?.Invoke();
@@ -263,6 +266,7 @@ sealed class ObsService
                 Busy = Paused = false;
                 Recording = true;
                 Bytes = 0;
+                _recordFile = path;
                 MarkStatus(TimeSpan.Zero);
                 break;
             case "OBS_WEBSOCKET_OUTPUT_PAUSED":
@@ -277,6 +281,7 @@ sealed class ObsService
                 TimeSpan length = Elapsed;
                 Busy = Recording = Paused = false;
                 Bytes = 0;
+                _recordFile = null;
                 MarkStatus(TimeSpan.Zero);
                 Changed?.Invoke();
                 if (!string.IsNullOrEmpty(path)) Saved?.Invoke(path, length);
@@ -291,11 +296,34 @@ sealed class ObsService
         if (await RequestAsync("GetRecordStatus") is not { ValueKind: JsonValueKind.Object } status) return;
         Recording = status.GetProperty("outputActive").GetBoolean();
         Paused = Recording && status.TryGetProperty("outputPaused", out JsonElement paused) && paused.GetBoolean();
-        Bytes = status.TryGetProperty("outputBytes", out JsonElement bytes) && bytes.TryGetInt64(out long size) ? size : 0;
         MarkStatus(Recording && status.TryGetProperty("outputDuration", out JsonElement ms) && ms.TryGetDouble(out double length)
             ? TimeSpan.FromMilliseconds(length)
             : TimeSpan.Zero);
+        if (!Recording) _recordFile = null;
+        else if (_recordFile == null && await RequestAsync("GetRecordDirectory") is { ValueKind: JsonValueKind.Object } folder
+            && folder.TryGetProperty("recordDirectory", out JsonElement directory) && directory.GetString() is { } path)
+            _recordFile = await Task.Run(() => FindNewestFile(path));
+        Bytes = Recording && _recordFile is { } file ? await Task.Run(() => MeasureFile(file)) : 0;
         Changed?.Invoke();
+    }
+
+    static string? FindNewestFile(string directory)
+    {
+        try { return new DirectoryInfo(directory).EnumerateFiles().MaxBy(file => file.CreationTimeUtc)?.FullName; }
+        catch { return null; }
+    }
+
+    static long MeasureFile(string path)
+    {
+        try
+        {
+            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return RandomAccess.GetLength(handle);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     async Task RefreshSceneAsync()
@@ -352,6 +380,7 @@ sealed class ObsService
         _pending.Clear();
         Recording = Paused = Busy = false;
         Bytes = 0;
+        _recordFile = null;
         MarkStatus(TimeSpan.Zero);
         SetState(refused ? Link.Refused : Link.Closed, true);
     }
