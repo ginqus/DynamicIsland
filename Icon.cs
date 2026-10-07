@@ -8,7 +8,7 @@ public enum Glyph
 {
     Mute, Quiet, Mid, Loud, Headphones, Speaker, Vpn, Offline, Wifi, Wired, Bell, Note, Battery, Minus, Plus, Chevron, Back,
     Clock, Gear, Lines, Sparkle, Rim, Expand, Windows, Power, Look, Size, Gap, Drop, Moon, Tray, Cross, Bolt, VpnOff, Bars, Update,
-    Segments, Stars,
+    Segments, Stars, Pointer,
 }
 
 public sealed class Icon : FrameworkElement
@@ -101,6 +101,7 @@ public sealed class Icon : FrameworkElement
         [Glyph.Stars] = new("M10,7 C10.46,10.83 12.77,13.14 16.6,13.6 C12.77,14.06 10.46,16.37 10,20.2 C9.54,16.37 7.23,14.06 3.4,13.6"
             + " C7.23,13.14 9.54,10.83 10,7 Z M17.4,2.6 C17.65,4.69 18.91,5.95 21,6.2 C18.91,6.45 17.65,7.71 17.4,9.8"
             + " C17.15,7.71 15.89,6.45 13.8,6.2 C15.89,5.95 17.15,4.69 17.4,2.6 Z M19.4,15.6 A1.1,1.1 0 1 0 19.4,17.8 A1.1,1.1 0 1 0 19.4,15.6 Z"),
+        [Glyph.Pointer] = new("M7,4 V18.6 L10.6,15.2 L13,20.4 L15.6,19.2 L13.2,14.1 H18.2 Z"),
         [Glyph.Drop] = new("M12,4 C9.6,7.4 6.2,11 6.2,14.4 A5.8,5.8 0 0 0 17.8,14.4 C17.8,11 14.4,7.4 12,4 Z"),
         [Glyph.Bolt] = new("M13.6,3 L6.2,13.3 H11.3 L10.4,21 L17.8,10.7 H12.7 Z"),
         [Glyph.Moon] = new("M10.58,4.44 A8.2,8.2 0 1 0 19.52,13.74 A6.8,6.8 0 0 1 10.58,4.44 Z"),

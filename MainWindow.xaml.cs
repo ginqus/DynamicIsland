@@ -57,7 +57,7 @@ public partial class MainWindow : Window
 
     static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.Shelf];
 
-    const double HostWidth = 620;
+    const double HostWidth = 620, HostHeight = 520;
     const double CompactMaxHeight = 40;
     const double BarelyVisible = 0.05;
     const double IntroScale = 0.3, IntroOffset = -50;
@@ -134,6 +134,7 @@ public partial class MainWindow : Window
         _forcedTimerSeconds = double.TryParse(Argument("--timer"), NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds) ? seconds : 0;
 
         _shapeLoop = new FrameLoop(AdvanceShape);
+        _glass = new Glass(this);
         _eqLoop = new FrameLoop(AdvanceEq, EqFrameSeconds);
         _seekLoop = new FrameLoop(AdvanceSeek);
         _transientTimeout = new DelayedAction(EndTransient);
@@ -243,6 +244,7 @@ public partial class MainWindow : Window
         RefreshUpdatePage();
         SyncAccent(false);
         SyncShelf();
+        SyncGlass(false);
         PlayIntro();
         _ticker.Start();
         if (_forcedTimerSeconds > 0) StartTimer(TimeSpan.FromSeconds(_forcedTimerSeconds));
@@ -258,6 +260,7 @@ public partial class MainWindow : Window
     {
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
+        _glass.Place();
     }
 
     void PlayIntro()
@@ -273,6 +276,7 @@ public partial class MainWindow : Window
     {
         _ticker.Stop();
         _alarm.Stop();
+        _glass.Hide();
         var fade = new DoubleAnimation(0, Ms(220));
         fade.Completed += (_, _) => Application.Current.Shutdown();
         Root.BeginAnimation(OpacityProperty, fade);
@@ -297,6 +301,7 @@ public partial class MainWindow : Window
             UpdateClock();
             PollPower();
             Native.KeepOnTop(_hwnd);
+            _glass.Place();
             if (_media.IsPlaying) _lastPlayedAt = DateTime.UtcNow;
             UpdateView();
         }

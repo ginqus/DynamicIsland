@@ -19,6 +19,13 @@ enum LyricChange
     Drum,
 }
 
+enum Hover
+{
+    Disc,
+    Magnet,
+    Flow,
+}
+
 static class Settings
 {
     const string Key = @"Software\DynamicIsland";
@@ -30,8 +37,10 @@ static class Settings
     static bool _rim = ReadSwitch(nameof(Rim)), _appVolume = ReadSwitch(nameof(AppVolume));
     static bool _dots = ReadSwitch(nameof(Dots), false);
     static bool _lineBar = ReadSwitch(nameof(LineBar));
+    static bool _glass = ReadSwitch(nameof(Glass), false);
     static Backdrop _backdrop = (Backdrop)Math.Clamp(Read(nameof(Backdrop), 0), 0, (int)Backdrop.MatrixAndStars);
     static LyricChange _lyricChange = (LyricChange)Math.Clamp(Read(nameof(LyricChange), (int)LyricChange.Wave), 0, (int)LyricChange.Drum);
+    static Hover _hover = (Hover)Math.Clamp(Read(nameof(Hover), 0), 0, (int)Hover.Flow);
     static int _scale = Math.Clamp(Read(nameof(Scale), DefaultScale), MinScale, MaxScale);
     static int _gap = Math.Clamp(Read(nameof(Gap), DefaultGap), 0, MaxGap);
     static int _accent = Read(nameof(Accent), 0);
@@ -48,6 +57,12 @@ static class Settings
         set => Write(nameof(LineBar), _lineBar = value);
     }
 
+    public static bool Glass
+    {
+        get => _glass;
+        set => Write(nameof(Glass), _glass = value);
+    }
+
     public static Backdrop Backdrop
     {
         get => _backdrop;
@@ -58,6 +73,12 @@ static class Settings
     {
         get => _lyricChange;
         set => Write(nameof(LyricChange), (int)(_lyricChange = value));
+    }
+
+    public static Hover Hover
+    {
+        get => _hover;
+        set => Write(nameof(Hover), (int)(_hover = value));
     }
 
     public static bool Lyrics

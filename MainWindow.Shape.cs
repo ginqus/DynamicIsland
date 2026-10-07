@@ -21,6 +21,8 @@ public partial class MainWindow
     const double MotionBlurSpeed = 650;
     const double MaxMotionBlur = 4, MinMotionBlur = 0.1;
     const double CacheScaleTolerance = 0.001;
+    const double ShadowReach = 100;
+    static readonly TimeSpan GlassTime = TimeSpan.FromMilliseconds(300);
 
     readonly Spring _width = new(34), _height = new(34), _radius = new(17);
     readonly Spring _scale = new(1, 320, 20), _offsetY = new(0, 260, 26), _leanX = new(0);
@@ -29,6 +31,7 @@ public partial class MainWindow
     readonly Spring _bubbleTimer = new(0, 260, 24), _bubbleShelf = new(0, 260, 24), _shelfBubbleWidth = new(ShelfBubbleWidth, 260, 24);
     readonly BlurEffect _motionBlur = new() { Radius = 0, RenderingBias = RenderingBias.Performance };
     readonly FrameLoop _shapeLoop;
+    readonly Glass _glass;
     readonly Spring[] _springs;
     Rect _clipRect = Rect.Empty;
     double _clipRadius;
@@ -122,6 +125,7 @@ public partial class MainWindow
             _clipRect = pill;
             _clipRadius = r;
             Host.Clip = Shared.Clip = Shadow.Data = Squircle.Of(pill, r);
+            Shadow.Clip = _glass.IsOn ? Around(Shadow.Data) : null;
         }
 
         FitMediaViews(w, h);
@@ -139,6 +143,32 @@ public partial class MainWindow
 
         PlaceCoverAndBars(pill, dpi);
         PlaceBubble(pill, r, scale);
+        CutGlass(dpi);
+    }
+
+    static Geometry Around(Geometry hole)
+    {
+        var around = new GeometryGroup { FillRule = FillRule.EvenOdd };
+        around.Children.Add(new RectangleGeometry(new Rect(-ShadowReach, -ShadowReach, HostWidth + 2 * ShadowReach, HostHeight + 2 * ShadowReach)));
+        around.Children.Add(hole);
+        return around;
+    }
+
+    void CutGlass(double dpi)
+    {
+        if (!_glass.IsOn || Body.TransformToAncestor(this) is not Transform place) return;
+        Matrix toPixels = place.Value;
+        toPixels.Scale(dpi, dpi);
+        _glass.Cut(Body.PillInside, Body.BubbleInside, toPixels);
+    }
+
+    void SyncGlass(bool animate)
+    {
+        if (Settings.Glass) _glass.Show();
+        else _glass.Hide();
+        Body.Thin(Settings.Glass, animate ? GlassTime : TimeSpan.Zero);
+        _clipRect = Rect.Empty;
+        ApplyShape();
     }
 
     void ApplyMotionBlur()
