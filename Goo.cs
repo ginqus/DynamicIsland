@@ -38,8 +38,12 @@ public sealed class Goo : FrameworkElement
 
     public (Rect Box, double Radius) BubbleInside => Inside(_bubble, _bubble.Height / 2);
 
-    public void Thin(bool glass, Duration time) =>
-        _fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(Color.FromArgb(glass ? GlassAlpha : byte.MaxValue, 0, 0, 0), time));
+    public void Thin(bool glass, Duration time, Action thinned)
+    {
+        var fade = new ColorAnimation(Color.FromArgb(glass ? GlassAlpha : byte.MaxValue, 0, 0, 0), time);
+        fade.Completed += (_, _) => thinned();
+        _fill.BeginAnimation(SolidColorBrush.ColorProperty, fade);
+    }
 
     public void StartFlashing(Color color, TimeSpan round)
     {

@@ -164,9 +164,23 @@ public partial class MainWindow
 
     void SyncGlass(bool animate)
     {
-        if (Settings.Glass) _glass.Show();
-        else _glass.Hide();
-        Body.Thin(Settings.Glass, animate ? GlassTime : TimeSpan.Zero);
+        if (Settings.Glass)
+        {
+            _glass.Show();
+            Reshape();
+        }
+        Body.Thin(Settings.Glass, animate ? GlassTime : TimeSpan.Zero, HideGlassOnceCovered);
+    }
+
+    void HideGlassOnceCovered()
+    {
+        if (Settings.Glass || !_glass.IsOn) return;
+        _glass.Hide();
+        Reshape();
+    }
+
+    void Reshape()
+    {
         _clipRect = Rect.Empty;
         ApplyShape();
     }
