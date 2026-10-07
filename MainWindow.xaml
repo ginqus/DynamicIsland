@@ -867,7 +867,7 @@
                                 <local:Icon Kind="Mid" Width="17" Height="17" Fill="{StaticResource Dim}"
                                             HorizontalAlignment="Left" VerticalAlignment="Center"/>
                                 <TextBlock Text="Спектр приложения" Margin="29,0,0,0" VerticalAlignment="Center"/>
-                                <local:Toggle x:Name="AppSpectrumSwitch" Width="38" Height="22" HorizontalAlignment="Right"/>
+                                <local:Toggle x:Name="AppSpectrumSwitch" Style="{StaticResource RowSwitch}"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="Network_Click">
