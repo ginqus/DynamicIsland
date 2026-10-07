@@ -12,11 +12,6 @@ public sealed class Equalizer : FrameworkElement
     const double Absent = 0.001;
     const double QuietOpacity = 0.55, LoudnessGain = 0.45;
 
-    const double RangeDb = 10, RestingHeight = 0.5;
-    const double BaselineRiseSeconds = 0.8, BaselineSinkSeconds = 2.5;
-    const double SpreadDb = 12;
-    const double FloorDb = -70;
-
     const double DotPitch = 4.2;
     const double UnlitOpacity = 0.16, LitOpacity = 0.72;
     const double HeadWhiteness = 0.5;
@@ -25,8 +20,10 @@ public sealed class Equalizer : FrameworkElement
     static readonly double[] WobbleSlow = [2.3, 3.1, 1.7, 2.9, 3.7, 2.1, 1.3, 3.3];
 
     public static readonly DependencyProperty FillProperty = DependencyProperty.Register(
-        nameof(Fill), typeof(Brush), typeof(Equalizer),
+        nameof(Fill), typeof(SolidColorBrush), typeof(Equalizer),
         new FrameworkPropertyMetadata(Brushes.White, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    readonly Shades _shades = new();
 
     int _bars = 5, _few = 5;
     double _open;
@@ -37,9 +34,9 @@ public sealed class Equalizer : FrameworkElement
 
     public Equalizer() => Rebuild();
 
-    public Brush Fill
+    public SolidColorBrush Fill
     {
-        get => (Brush)GetValue(FillProperty);
+        get => (SolidColorBrush)GetValue(FillProperty);
         set => SetValue(FillProperty, value);
     }
 
@@ -155,6 +152,7 @@ public sealed class Equalizer : FrameworkElement
         double w = ActualWidth, h = ActualHeight;
         if (w <= 0 || h <= 0) return;
 
+        Color fill = Fill.Color;
         double standing = Few + (_bars - Few) * _open;
         double gap = (w - standing * BarWidth) / Math.Max(standing - 1, 1), x = 0;
         for (int bar = 0; bar < _bars; bar++)
@@ -162,22 +160,21 @@ public sealed class Equalizer : FrameworkElement
             double presence = Math.Clamp(standing - _bandOfBar[bar], 0, 1);
             if (presence > Absent)
             {
-                if (_dots) DrawDots(dc, x, h, _levels[bar], presence);
-                else DrawBar(dc, x, h, _levels[bar], presence);
+                if (_dots) DrawDots(dc, fill, x, h, _levels[bar], presence);
+                else DrawBar(dc, fill, x, h, _levels[bar], presence);
             }
             x += presence * (BarWidth + gap);
         }
     }
 
-    void DrawBar(DrawingContext dc, double x, double h, double level, double presence)
+    void DrawBar(DrawingContext dc, Color fill, double x, double h, double level, double presence)
     {
         double width = BarWidth * presence, height = width + level * (h - width) * presence;
-        dc.PushOpacity((QuietOpacity + LoudnessGain * level) * presence);
-        dc.DrawRoundedRectangle(Fill, null, new Rect(x, (h - height) / 2, width, height), width / 2, width / 2);
-        dc.Pop();
+        Brush shade = _shades.Of(fill, (QuietOpacity + LoudnessGain * level) * presence);
+        dc.DrawRoundedRectangle(shade, null, new Rect(x, (h - height) / 2, width, height), width / 2, width / 2);
     }
 
-    void DrawDots(DrawingContext dc, double x, double h, double level, double presence)
+    void DrawDots(DrawingContext dc, Color fill, double x, double h, double level, double presence)
     {
         double fit = h / DotPitch, whole = Math.Floor(fit), part = Math.Clamp((fit - whole - 0.3) / 0.4, 0, 1);
         double rows = Math.Max(whole + part * part * (3 - 2 * part), 1);
@@ -188,58 +185,10 @@ public sealed class Equalizer : FrameworkElement
             double row = Math.Min(rows - r, 1), size = BarWidth * presence * row;
             double on = Math.Clamp(lit - r, 0, 1), head = on * (1 - Math.Clamp(lit - r - 1, 0, 1));
             var center = new Point(x + BarWidth * presence / 2, y - size / 2);
-            dc.PushOpacity((UnlitOpacity + (LitOpacity - UnlitOpacity) * on + (1 - LitOpacity) * head) * presence * row);
-            dc.DrawEllipse(Fill, null, center, size / 2, size / 2);
-            dc.Pop();
-            if (head > 0.01)
-            {
-                dc.PushOpacity(HeadWhiteness * head * presence * row);
-                dc.DrawEllipse(Brushes.White, null, center, size / 2, size / 2);
-                dc.Pop();
-            }
+            Brush shade = _shades.Of(fill, (UnlitOpacity + (LitOpacity - UnlitOpacity) * on + (1 - LitOpacity) * head) * presence * row);
+            dc.DrawEllipse(shade, null, center, size / 2, size / 2);
+            if (head > 0.01) dc.DrawEllipse(Shades.White(HeadWhiteness * head * presence * row), null, center, size / 2, size / 2);
             y -= row * (BarWidth + gap);
-        }
-    }
-
-    sealed class BandMeter
-    {
-        readonly double[] _db, _baseline;
-
-        public BandMeter(int bars)
-        {
-            Heights = new double[bars];
-            _db = new double[bars];
-            _baseline = new double[bars];
-            Array.Fill(_baseline, FloorDb);
-        }
-
-        public double[] Heights { get; }
-
-        public void Measure(float[] spectrum, double dt)
-        {
-            int bars = Heights.Length;
-            double headroom = RangeDb * (1 - RestingHeight), top = FloorDb;
-            for (int i = 0; i < bars; i++)
-            {
-                int from = i * spectrum.Length / bars, to = Math.Max((i + 1) * spectrum.Length / bars, from + 1);
-                double power = 0;
-                for (int bin = from; bin < to; bin++) power += spectrum[bin];
-                double db = _db[i] = 10 * Math.Log10(power / (to - from) + 1e-14);
-
-                if (db > FloorDb)
-                {
-                    double baseline = _baseline[i];
-                    baseline += (db - baseline) * (1 - Math.Exp(-dt / (db > baseline ? BaselineRiseSeconds : BaselineSinkSeconds)));
-                    _baseline[i] = Math.Max(baseline, db - headroom);
-                }
-                top = Math.Max(top, _baseline[i]);
-            }
-
-            for (int i = 0; i < bars; i++)
-            {
-                double reference = Math.Max(_baseline[i], top - SpreadDb);
-                Heights[i] = Math.Clamp(RestingHeight + (_db[i] - reference) / RangeDb, 0, 1);
-            }
         }
     }
 }

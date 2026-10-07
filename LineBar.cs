@@ -11,18 +11,20 @@ public sealed class LineBar : FrameworkElement
     const double PassedOpacity = 0.85;
     const double AheadOpacity = 0.3;
 
-    static readonly Brush Unplayed = Frozen(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF));
+    static readonly Brush Unplayed = Shades.Frozen(new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)));
 
     public static readonly DependencyProperty AccentProperty = DependencyProperty.Register(
-        nameof(Accent), typeof(Brush), typeof(LineBar),
+        nameof(Accent), typeof(SolidColorBrush), typeof(LineBar),
         new FrameworkPropertyMetadata(Brushes.White, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    readonly Shades _shades = new();
 
     double[] _starts = [];
     double _fill;
 
-    public Brush Accent
+    public SolidColorBrush Accent
     {
-        get => (Brush)GetValue(AccentProperty);
+        get => (SolidColorBrush)GetValue(AccentProperty);
         set => SetValue(AccentProperty, value);
     }
 
@@ -86,26 +88,16 @@ public sealed class LineBar : FrameworkElement
 
             if (i != current)
             {
-                if (i < current) dc.PushOpacity(PassedOpacity);
-                dc.DrawRoundedRectangle(i < current ? Brushes.White : Unplayed, null, segment, radius, radius);
-                if (i < current) dc.Pop();
+                dc.DrawRoundedRectangle(i < current ? Shades.White(PassedOpacity) : Unplayed, null, segment, radius, radius);
                 continue;
             }
 
-            dc.PushOpacity(AheadOpacity);
-            dc.DrawRoundedRectangle(Accent, null, segment, radius, radius);
-            dc.Pop();
+            Color accent = Accent.Color;
+            dc.DrawRoundedRectangle(_shades.Of(accent, AheadOpacity), null, segment, radius, radius);
             if (fill <= left) continue;
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, fill, height)));
-            dc.DrawRoundedRectangle(Accent, null, segment, radius, radius);
+            dc.DrawRoundedRectangle(_shades.Of(accent, 1), null, segment, radius, radius);
             dc.Pop();
         }
-    }
-
-    static Brush Frozen(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
     }
 }

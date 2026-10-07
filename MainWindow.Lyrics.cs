@@ -16,8 +16,6 @@ public partial class MainWindow
     const double LyricFadeEdge = 8;
     const double LyricScrollSpeed = 36;
     const double LyricGapSeconds = 4;
-    const double LyricBlur = 6;
-    const double LyricRise = 10;
     const double PlayerHeight = 176;
     const double PlayerLyricsHeight = 74;
     const double PlayerLineGap = 4;
@@ -44,7 +42,7 @@ public partial class MainWindow
     string _lyricTitle = "";
     bool _lyricShowsTitle;
     double _compactMediaWidth = CompactMediaWidth;
-    TextBlock _lyricBlock;
+    CompactLyric _lyricBlock;
     LyricsService.Line[] _playerLines = [];
     PlayerLine[] _playerRows = [];
     double _playerScroll;
@@ -102,22 +100,14 @@ public partial class MainWindow
 
     void ShowLyric(string text, double seconds, bool snap, bool named)
     {
-        TextBlock old = _lyricBlock;
+        CompactLyric old = _lyricBlock;
         if (text == old.Text && (text.Length == 0 || (named && _lyricShowsTitle))) return;
-        TextBlock next = _lyricBlock = old == LyricA ? LyricB : LyricA;
+        CompactLyric next = _lyricBlock = old == LyricA ? LyricB : LyricA;
         _lyricShowsTitle = named;
 
-        old.AnimateBlur(0, LyricBlur, Ms(snap ? 0 : 220), keep: true);
-        old.RenderTransform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-LyricRise, Ms(snap ? 0 : 260))
-        {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        });
-        old.BeginAnimation(OpacityProperty, new DoubleAnimation(0, Ms(snap ? 0 : 200)));
-
-        next.Foreground = named ? _dim : Brushes.White;
-        next.TextTrimming = named ? TextTrimming.CharacterEllipsis : TextTrimming.None;
-        next.MaxWidth = named ? TrackNameWidth - LyricInset - 2 * LyricFadeEdge : double.PositiveInfinity;
-        next.Text = text;
+        old.Leave(snap);
+        next.Show(text, named ? _dim : Brushes.White,
+            named ? TrackNameWidth - LyricInset - 2 * LyricFadeEdge : double.PositiveInfinity, Settings.LyricChange);
         next.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double width = next.DesiredSize.Width;
         Canvas.SetTop(next, Math.Round((LyricBox.Height - next.DesiredSize.Height) / 2));
@@ -130,14 +120,9 @@ public partial class MainWindow
         if (!snap) _width.Tune(280, 30);
         UpdateTargets();
 
-        var enter = (TranslateTransform)next.RenderTransform;
-        enter.X = overflow > 0 ? LyricFadeEdge : (box - width) / 2;
-        enter.BeginAnimation(TranslateTransform.XProperty, overflow > 0 ? CreateLyricScroll(overflow, seconds) : null);
-
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        next.AnimateBlur(LyricBlur, 0, Ms(300), ease);
-        enter.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(LyricRise, 0, Ms(380)) { EasingFunction = ease });
-        next.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, Ms(300)));
+        next.Offset.X = overflow > 0 ? LyricFadeEdge : (box - width) / 2;
+        next.Offset.BeginAnimation(TranslateTransform.XProperty, overflow > 0 ? CreateLyricScroll(overflow, seconds) : null);
+        next.Enter();
     }
 
     static DoubleAnimationUsingKeyFrames CreateLyricScroll(double overflow, double seconds)

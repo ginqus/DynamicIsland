@@ -10,8 +10,11 @@ public partial class MainWindow
 {
     const double UpdatePagePadding = 14;
     const int MegabyteShift = 20;
-    static readonly int[] ScaleOptions = [85, 100, 115, 130];
-    static readonly int[] GapOptions = [0, 4, 8, 12, 16, 24];
+    const double LookHeight = 448, LookTilesHeight = 72;
+    const int LargestScale = 130, ScaleStep = 5;
+    const int LargestGap = 24, GapStep = 2;
+
+    Border? _openLookTiles;
 
     void SettingsRow_Click(object sender, RoutedEventArgs e) => ShowPanelAndCheckUpdate(Panel.Settings);
 
@@ -160,41 +163,98 @@ public partial class MainWindow
         if (_view == View.Update) UpdateTargets();
     }
 
-    static int StepOption(int[] among, int value, int by, bool wrap)
-    {
-        int count = among.Length, at = Array.IndexOf(among, value) + by;
-        return among[wrap ? (at % count + count) % count : Math.Clamp(at, 0, count - 1)];
-    }
+    void SizeSlider_Changed(object? sender, EventArgs e) => SetScale((int)SizeSlider.Value);
 
-    void Size_Click(object sender, RoutedEventArgs e) => SetScale(StepOption(ScaleOptions, Settings.Scale, 1, true));
-
-    void Gap_Click(object sender, RoutedEventArgs e) => SetGap(StepOption(GapOptions, Settings.Gap, 1, true));
+    void GapSlider_Changed(object? sender, EventArgs e) => SetGap((int)GapSlider.Value);
 
     void SetScale(int percent)
     {
-        if (percent == Settings.Scale) return;
+        int was = Settings.Scale;
         Settings.Scale = percent;
-        ApplyLook();
+        if (Settings.Scale != was) ApplyLook();
     }
 
     void SetGap(int px)
     {
-        if (px == Settings.Gap) return;
+        int was = Settings.Gap;
         Settings.Gap = px;
-        ApplyLook();
+        if (Settings.Gap != was) ApplyLook();
     }
 
     void Dots_Click(object sender, RoutedEventArgs e)
     {
-        Eq.Dots = Settings.Dots = !Settings.Dots;
+        Eq.Dots = Settings.Dots = DotsSegments.PickUnderPointer() == 1;
         RefreshLookPage();
+    }
+
+    void Glass_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.Glass = !Settings.Glass;
+        RefreshLookPage();
+        SyncGlass(true);
     }
 
     void SeekStyle_Click(object sender, RoutedEventArgs e)
     {
-        Settings.LineBar = !Settings.LineBar;
+        Settings.LineBar = SeekStyleSegments.PickUnderPointer() == 1;
         RefreshLookPage();
         SyncSeekStyle(true);
+    }
+
+    void BackdropRow_Click(object sender, RoutedEventArgs e) => ToggleLookTiles(BackdropTiles);
+
+    void LyricChangeRow_Click(object sender, RoutedEventArgs e) => ToggleLookTiles(LyricChangeTiles);
+
+    void HoverRow_Click(object sender, RoutedEventArgs e) => ToggleLookTiles(HoverTiles);
+
+    void BackdropTile_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.Backdrop = (Backdrop)BackdropStrip.Children.IndexOf((UIElement)sender);
+        RefreshLookPage();
+        SyncBackdrop();
+    }
+
+    void LyricChangeTile_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.LyricChange = (LyricChange)LyricChangeStrip.Children.IndexOf((UIElement)sender);
+        RefreshLookPage();
+    }
+
+    void HoverTile_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.Hover = (Hover)HoverStrip.Children.IndexOf((UIElement)sender);
+        RefreshLookPage();
+    }
+
+    void ToggleLookTiles(Border tiles)
+    {
+        _openLookTiles = tiles == _openLookTiles ? null : tiles;
+        SlideLookTiles(BackdropTiles, BackdropChevron);
+        SlideLookTiles(LyricChangeTiles, LyricChangeChevron);
+        SlideLookTiles(HoverTiles, HoverChevron);
+    }
+
+    void SlideLookTiles(Border tiles, Icon chevron)
+    {
+        bool open = tiles == _openLookTiles;
+        if (!open && tiles.Visibility != Visibility.Visible) return;
+
+        tiles.Visibility = Visibility.Visible;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var slide = new DoubleAnimation(open ? LookTilesHeight : 0, Ms(open ? 320 : 240)) { EasingFunction = ease };
+        slide.Completed += (_, _) =>
+        {
+            if (tiles != _openLookTiles) tiles.Visibility = Visibility.Collapsed;
+        };
+        tiles.BeginAnimation(HeightProperty, slide);
+        tiles.Child.BeginAnimation(OpacityProperty, new DoubleAnimation(open ? 1 : 0, Ms(open ? 260 : 160)));
+        chevron.RenderTransform.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(open ? 90 : 0, Ms(240)) { EasingFunction = ease });
+    }
+
+    void LookTiles_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        LookView.Height = LookHeight + BackdropTiles.ActualHeight + LyricChangeTiles.ActualHeight + HoverTiles.ActualHeight;
+        if (_view == View.Look) UpdateTargets();
     }
 
     void Accent_Click(object sender, RoutedEventArgs e)
@@ -209,8 +269,33 @@ public partial class MainWindow
     {
         SizeText.Text = Settings.Scale + "%";
         GapText.Text = Settings.Gap + " px";
-        DotsText.Text = Settings.Dots ? "Матрица" : "Полоски";
-        SeekStyleText.Text = Settings.LineBar ? "По строкам" : "Сплошная";
+        SizeSlider.Set(Settings.Scale, LookView.IsVisible);
+        GapSlider.Set(Settings.Gap, LookView.IsVisible);
+        DotsSegments.Set(Settings.Dots ? 1 : 0, LookView.IsVisible);
+        SeekStyleSegments.Set(Settings.LineBar ? 1 : 0, LookView.IsVisible);
+        GlassSwitch.Set(Settings.Glass, LookView.IsVisible);
+        ((RadioButton)BackdropStrip.Children[(int)Settings.Backdrop]).IsChecked = true;
+        ((RadioButton)LyricChangeStrip.Children[(int)Settings.LyricChange]).IsChecked = true;
+        ((RadioButton)HoverStrip.Children[(int)Settings.Hover]).IsChecked = true;
+        BackdropText.Text = Settings.Backdrop switch
+        {
+            Backdrop.Matrix => "Матрица",
+            Backdrop.Stars => "Звёзды",
+            Backdrop.MatrixAndStars => "Матрица и звёзды",
+            _ => "Свечение",
+        };
+        LyricChangeText.Text = Settings.LyricChange switch
+        {
+            LyricChange.Wave => "Волна по буквам",
+            LyricChange.Drum => "Барабан по словам",
+            _ => "Плавно",
+        };
+        HoverText.Text = Settings.Hover switch
+        {
+            Hover.Magnet => "Магнит",
+            Hover.Flow => "Перетекание",
+            _ => "Диск",
+        };
         foreach (RadioButton dot in AccentStrip.Children)
         {
             Color? color = dot.Background is SolidColorBrush own ? own.Color : null;

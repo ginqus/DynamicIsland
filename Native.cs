@@ -13,6 +13,11 @@ static class Native
     const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
     const long WS_EX_TOOLWINDOW = 0x00000080;
     const long WS_EX_NOACTIVATE = 0x08000000;
+    const long WS_EX_TRANSPARENT = 0x00000020, WS_EX_LAYERED = 0x00080000, WS_EX_TOPMOST = 0x00000008;
+    const long WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
+    const long WS_POPUP = 0x80000000;
+    const uint LWA_ALPHA = 2;
+    const int SW_SHOWNOACTIVATE = 4;
     const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
     const uint MONITOR_DEFAULTTONEAREST = 2;
     const uint MONITORINFOF_PRIMARY = 1;
@@ -21,6 +26,8 @@ static class Native
     const ulong WNF_SHEL_QUIETHOURS_ACTIVE_PROFILE_CHANGED = 0x0D83063EA3BF1C75;
     const byte AC_LINE_ONLINE = 1, BATTERY_FLAG_NO_BATTERY = 128, BATTERY_FLAG_UNKNOWN = 255, BATTERY_PERCENT_MAX = 100;
     const int ClassNameCapacity = 64;
+    const int DWMWA_USE_HOSTBACKDROPBRUSH = 17;
+    const int DQTYPE_THREAD_CURRENT = 2, DQTAT_COM_STA = 2;
     static readonly IntPtr HWND_TOPMOST = new(-1);
     static readonly int ShellMessage = (int)RegisterWindowMessage("SHELLHOOK");
 
@@ -36,6 +43,23 @@ static class Native
         public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
         public int BatteryLifeTime, BatteryFullLifeTime;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct DispatcherQueueOptions { public int dwSize, threadType, apartmentType; }
+
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateWindowEx(uint exStyle, string className, string? title, uint style, int x, int y, int width, int height,
+        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+
+    [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint key, byte alpha, uint flags);
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("CoreMessaging.dll")]
+    static extern int CreateDispatcherQueueController(DispatcherQueueOptions options, out IntPtr controller);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
@@ -82,6 +106,31 @@ static class Native
     {
         long style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE));
+    }
+
+    public static IntPtr CreateBackdropWindow()
+    {
+        long style = WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
+        IntPtr hwnd = CreateWindowEx((uint)style, "Static", null, (uint)WS_POPUP, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        SetLayeredWindowAttributes(hwnd, 0, byte.MaxValue, LWA_ALPHA);
+        int on = 1;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, ref on, sizeof(int));
+        return hwnd;
+    }
+
+    public static void Destroy(IntPtr hwnd) => DestroyWindow(hwnd);
+
+    public static void PlaceBehind(IntPtr hwnd, IntPtr front)
+    {
+        if (!GetWindowRect(front, out RECT rect)) return;
+        SetWindowPos(hwnd, front, rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top, SWP_NOACTIVATE);
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+
+    public static bool StartDispatcherQueue()
+    {
+        var options = new DispatcherQueueOptions { dwSize = Marshal.SizeOf<DispatcherQueueOptions>(), threadType = DQTYPE_THREAD_CURRENT, apartmentType = DQTAT_COM_STA };
+        return CreateDispatcherQueueController(options, out _) >= 0;
     }
 
     public static bool IsToolWindow(IntPtr hwnd) => (GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64() & WS_EX_TOOLWINDOW) != 0;

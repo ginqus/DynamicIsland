@@ -8,7 +8,7 @@ public enum Glyph
 {
     Mute, Quiet, Mid, Loud, Headphones, Speaker, Vpn, Offline, Wifi, Wired, Bell, Note, Battery, Minus, Plus, Chevron, Back,
     Clock, Gear, Lines, Sparkle, Rim, Expand, Windows, Power, Look, Size, Gap, Drop, Moon, Tray, Cross, Bolt, VpnOff, Bars, Update,
-    Segments,
+    Segments, Stars, Pointer, Record, Folder,
 }
 
 public sealed class Icon : FrameworkElement
@@ -98,12 +98,19 @@ public sealed class Icon : FrameworkElement
         [Glyph.Gap] = new(Lines: "M4,4.6 H20 M8.5,12.6 H15.5 A3.2,3.2 0 0 1 15.5,19 H8.5 A3.2,3.2 0 0 1 8.5,12.6 Z", Line: 2.2),
         [Glyph.Bars] = new(Lines: "M5.5,10 V14 M12,5.5 V18.5 M18.5,8.5 V15.5", Line: 2.6),
         [Glyph.Segments] = new("M14.4,9.4 A2.6,2.6 0 1 0 14.4,14.6 A2.6,2.6 0 1 0 14.4,9.4 Z", "M4.2,12 H7.6 M10.4,12 H11.4 M18.4,12 H19.8", 2.4),
+        [Glyph.Stars] = new("M10,7 C10.46,10.83 12.77,13.14 16.6,13.6 C12.77,14.06 10.46,16.37 10,20.2 C9.54,16.37 7.23,14.06 3.4,13.6"
+            + " C7.23,13.14 9.54,10.83 10,7 Z M17.4,2.6 C17.65,4.69 18.91,5.95 21,6.2 C18.91,6.45 17.65,7.71 17.4,9.8"
+            + " C17.15,7.71 15.89,6.45 13.8,6.2 C15.89,5.95 17.15,4.69 17.4,2.6 Z M19.4,15.6 A1.1,1.1 0 1 0 19.4,17.8 A1.1,1.1 0 1 0 19.4,15.6 Z"),
+        [Glyph.Pointer] = new("M7,4 V18.6 L10.6,15.2 L13,20.4 L15.6,19.2 L13.2,14.1 H18.2 Z"),
         [Glyph.Drop] = new("M12,4 C9.6,7.4 6.2,11 6.2,14.4 A5.8,5.8 0 0 0 17.8,14.4 C17.8,11 14.4,7.4 12,4 Z"),
         [Glyph.Bolt] = new("M13.6,3 L6.2,13.3 H11.3 L10.4,21 L17.8,10.7 H12.7 Z"),
         [Glyph.Moon] = new("M10.58,4.44 A8.2,8.2 0 1 0 19.52,13.74 A6.8,6.8 0 0 1 10.58,4.44 Z"),
         [Glyph.Tray] = new(Lines: "M4,13.5 L6.4,6.2 A1.6,1.6 0 0 1 7.9,5.1 H16.1 A1.6,1.6 0 0 1 17.6,6.2 L20,13.5 V17.6 A2,2 0 0 1 18,19.6"
             + " H6 A2,2 0 0 1 4,17.6 Z M4,13.5 H8.6 L9.8,15.6 H14.2 L15.4,13.5 H20"),
         [Glyph.Cross] = new(Lines: "M7.5,7.5 L16.5,16.5 M16.5,7.5 L7.5,16.5", Line: 2.6),
+        [Glyph.Record] = new("M12,8.2 A3.8,3.8 0 1 0 12,15.8 A3.8,3.8 0 1 0 12,8.2 Z", "M12,3.8 A8.2,8.2 0 1 0 12,20.2 A8.2,8.2 0 1 0 12,3.8 Z"),
+        [Glyph.Folder] = new("M3.6,6.6 A1.6,1.6 0 0 1 5.2,5 H9.4 L11.4,7 H18.8 A1.6,1.6 0 0 1 20.4,8.6 V17.4 A1.6,1.6 0 0 1 18.8,19 H5.2"
+            + " A1.6,1.6 0 0 1 3.6,17.4 Z"),
     };
 
     static readonly Dictionary<Glyph, Geometry> Outlines = [];

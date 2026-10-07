@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -21,6 +22,7 @@ public partial class MainWindow
 
     readonly SpectrumService _spectrum = new();
     readonly float[] _bands = new float[SpectrumService.Bands];
+    readonly SpectrumLevels _backdropLevels = new();
     readonly SolidColorBrush _accentBrush = new(Colors.White);
     readonly Spring _coverLeft = new(0), _coverTop = new(0), _coverSize = new(FullCoverSize);
     readonly Spring _barsRight = new(0), _barsCenterY = new(0), _barsWidth = new(1), _barsHeight = new(1), _barsOpen = new(0);
@@ -137,7 +139,18 @@ public partial class MainWindow
         _accentBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(AccentColor, time));
         Color[] palette = Settings.Accent is { } own ? CoverPalette.Around(own) : _media.Palette;
         Glow.Tint(palette, time);
+        PlayerMatrix.Tint(palette, time);
         PlayerLyricWait.Tint(palette, time);
+        foreach (RadioButton tile in BackdropStrip.Children) ((BackdropPreview)tile.Content).Tint(palette);
+    }
+
+    void SyncBackdrop()
+    {
+        Backdrop backdrop = Settings.Backdrop;
+        Glow.SetVisible(backdrop == Backdrop.Glow);
+        PlayerMatrix.SetVisible(backdrop.HasFlag(Backdrop.Matrix));
+        PlayerStars.SetVisible(backdrop.HasFlag(Backdrop.Stars));
+        PlayerStars.AboveMatrix = backdrop.HasFlag(Backdrop.Matrix);
     }
 
     void SyncEq()
@@ -160,8 +173,17 @@ public partial class MainWindow
         }
 
         bool moving = Eq.Tick(bands, level, playing, now, dt);
-        moving |= Glow.Tick(Eq, now, dt);
+        moving |= Settings.Backdrop == Backdrop.Glow ? Glow.Tick(Eq, now, dt) : AdvanceBackdrop(bands, playing, now, dt);
         return IsEqVisible && (playing || moving);
+    }
+
+    bool AdvanceBackdrop(float[]? bands, bool playing, double now, double dt)
+    {
+        _backdropLevels.Follow(bands, Eq, playing, dt);
+        Backdrop backdrop = Settings.Backdrop;
+        bool moving = backdrop.HasFlag(Backdrop.Matrix) && PlayerMatrix.Tick(_backdropLevels);
+        if (backdrop.HasFlag(Backdrop.Stars)) moving |= PlayerStars.Tick(_backdropLevels, playing, now, dt);
+        return moving;
     }
 
     void FitMediaViews(double w, double h)

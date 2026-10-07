@@ -33,7 +33,7 @@ public sealed class Aura : FrameworkElement
     {
         for (int p = 0; p < _brushes.Length; p++)
         {
-            _brushes[p] = new RadialGradientBrush();
+            _brushes[p] = new RadialGradientBrush { Opacity = BaseOpacity };
             foreach (var (offset, alpha) in Falloff)
                 _brushes[p].GradientStops.Add(new GradientStop(Colors.White.WithAlpha(alpha), offset));
         }
@@ -65,6 +65,7 @@ public sealed class Aura : FrameworkElement
             double next = _levels[p] + (target - _levels[p]) * (target > _levels[p] ? rise : fall);
             if (Math.Abs(next - _levels[p]) > StillBelow) moved = true;
             _levels[p] = next;
+            _brushes[p].Opacity = BaseOpacity + OpacityGain * next;
         }
 
         _time = t;
@@ -82,9 +83,7 @@ public sealed class Aura : FrameworkElement
             Patch patch = Patches[p];
             double level = _levels[p];
             double x = w * (patch.Center + DriftRange * Math.Sin(_time * patch.DriftSpeed + patch.DriftPhase));
-            dc.PushOpacity(BaseOpacity + OpacityGain * level);
             dc.DrawEllipse(_brushes[p], null, new Point(x, h), w * (BaseWidth + WidthGain * level), h * (BaseHeight + HeightGain * level));
-            dc.Pop();
         }
     }
 }

@@ -118,8 +118,14 @@ public partial class MainWindow
 
     void ToggleOpen()
     {
+        if (_view == View.Notice && _noticeOpen is { } open)
+        {
+            open();
+            EndTransient();
+            return;
+        }
         if (_ringing || _panel != Panel.None) SelectPanel(Panel.None);
-        else SelectPanel(IsMediaActive || !_countdown.IsActive ? Panel.Player : Panel.Timer);
+        else SelectPanel(IsMediaActive ? Panel.Player : _obs.Recording ? Panel.Record : _countdown.IsActive ? Panel.Timer : Panel.Player);
         UpdateView();
     }
 
@@ -190,8 +196,8 @@ public partial class MainWindow
         e.Handled = true;
         if (Native.IsCtrlDown) SwitchSource(-step);
         else if (_view == View.TimerSet) SetMinutes(_setupMinutes + step);
-        else if (_view == View.Look && SizeRow.IsMouseOver) SetScale(StepOption(ScaleOptions, Settings.Scale, step, false));
-        else if (_view == View.Look && GapRow.IsMouseOver) SetGap(StepOption(GapOptions, Settings.Gap, step, false));
+        else if (_view == View.Look && SizeRow.IsMouseOver) SetScale(Settings.Scale + step * ScaleStep);
+        else if (_view == View.Look && GapRow.IsMouseOver) SetGap(Settings.Gap + step * GapStep);
         else if (_view == View.Shelf && ShelfOverflow > 0) ScrollShelf(-step);
         else if (_view == View.MediaBig && Settings.AppVolume && _audio.AdjustAppVolume(_media.Source, step * WheelVolumeStep, out float level))
             ShowPlayerVolume(level, false, true);
