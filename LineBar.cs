@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Media;
 
 namespace DynamicIsland;
@@ -10,23 +12,52 @@ public sealed class LineBar : FrameworkElement
     const double SnapReach = 5;
     const double PassedOpacity = 0.85;
     const double AheadOpacity = 0.3;
+    const double UnplayedOpacity = 0.2;
+    const double SampleStep = 4;
+    const double MinThickness = 2, RestThickness = 6;
+    const double BulgeThickness = 8, BulgeReach = 28;
+    const double LiftThickness = 12, LitAheadOpacity = 0.45, DimmedShare = 0.45;
+    const double WaveThickness = 10, WaveSpeed = 420;
+    const double TipFontSize = 12, TipPadding = 10, TipHeight = 22, TipLift = 4, TipRise = 4;
 
-    static readonly Brush Unplayed = Shades.Frozen(new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)));
+    static readonly Brush TipBack = Shades.Frozen(new SolidColorBrush(Color.FromArgb(0xF0, 0x24, 0x24, 0x24)));
 
     public static readonly DependencyProperty AccentProperty = DependencyProperty.Register(
         nameof(Accent), typeof(SolidColorBrush), typeof(LineBar),
         new FrameworkPropertyMetadata(Brushes.White, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    sealed class Column(double left, double right, string? text)
+    {
+        public double Left { get; } = left;
+        public double Right { get; } = right;
+        public string? Text { get; } = text;
+        public double Center => (Left + Right) / 2;
+        public Spring Rise { get; } = new(RestThickness);
+        public bool Raised { get; set; }
+    }
+
     readonly Shades _shades = new();
+    readonly List<Column> _columns = [];
+    readonly Spring _focus = new(0, 300, 30), _tipShown = new(0, 300, 30), _tipX = new(0, 420, 32);
 
     double[] _starts = [];
-    double _fill;
+    string[] _texts = [];
+    double _fill, _thickness = RestThickness;
+    double _columnsWidth = -1;
+    bool _columnsStale = true;
+    SeekHover _hover = SeekHover.Magnifier;
+    double _time, _enteredAt, _leftAt, _enteredX, _leftX, _lastX;
+    bool _pointed;
+    int _pointedColumn = -1;
+    string _tipText = "";
 
     public SolidColorBrush Accent
     {
         get => (SolidColorBrush)GetValue(AccentProperty);
         set => SetValue(AccentProperty, value);
     }
+
+    public bool Solid { get; set; }
 
     public bool HasMarks => _starts.Length > 0;
 
@@ -41,9 +72,22 @@ public sealed class LineBar : FrameworkElement
         }
     }
 
-    public void SetStarts(double[] fractions)
+    public double Thickness
     {
-        _starts = fractions;
+        get => _thickness;
+        set
+        {
+            if (value == _thickness) return;
+            _thickness = value;
+            InvalidateVisual();
+        }
+    }
+
+    public void SetLines(double[] starts, string[] texts)
+    {
+        _starts = starts;
+        _texts = texts;
+        _columnsStale = true;
         InvalidateVisual();
     }
 
@@ -55,6 +99,118 @@ public sealed class LineBar : FrameworkElement
             if (Math.Abs(edges[i] - x) <= SnapReach && Math.Abs(edges[i] - x) < Math.Abs(nearest - x)) nearest = edges[i];
         return nearest;
     }
+
+    internal void Advance(double dt, double? pointer, SeekHover hover)
+    {
+        double width = ActualWidth;
+        if (width <= 0) return;
+
+        if (_columnsStale || width != _columnsWidth) BuildColumns(width);
+        if (Solid && hover == SeekHover.Lift) hover = SeekHover.Magnifier;
+        if (hover != _hover)
+        {
+            _hover = hover;
+            foreach (Column column in _columns)
+            {
+                column.Raised = false;
+                TuneRise(column);
+            }
+        }
+
+        _time += dt;
+        bool pointed = pointer.HasValue;
+        double x = Math.Clamp(pointer ?? _lastX, 0, width);
+        if (pointed != _pointed)
+        {
+            _pointed = pointed;
+            if (pointed) (_enteredAt, _enteredX) = (_time, x);
+            else (_leftAt, _leftX) = (_time, _lastX);
+        }
+        if (pointed) _lastX = x;
+        _pointedColumn = pointed ? ColumnAt(x) : -1;
+
+        foreach (Column column in _columns)
+        {
+            column.Rise.Target = RiseFor(column, x);
+            column.Rise.Advance(dt);
+        }
+
+        bool lifting = _hover == SeekHover.Lift && _pointedColumn >= 0;
+        string? text = lifting ? _columns[_pointedColumn].Text : null;
+        if (text != null)
+        {
+            if (_tipShown.Value < 0.01) _tipX.Snap(_columns[_pointedColumn].Center);
+            _tipX.Target = _columns[_pointedColumn].Center;
+            _tipText = text;
+        }
+        _focus.Target = lifting ? 1 : 0;
+        _tipShown.Target = text != null ? 1 : 0;
+        _focus.Advance(dt);
+        _tipShown.Advance(dt);
+        _tipX.Advance(dt);
+        InvalidateVisual();
+    }
+
+    void BuildColumns(double width)
+    {
+        _columns.Clear();
+        _columnsWidth = width;
+        _columnsStale = false;
+        if (Solid)
+        {
+            int count = Math.Max(1, (int)Math.Ceiling(width / SampleStep));
+            for (int i = 0; i < count; i++) _columns.Add(new Column(width * i / count, width * (i + 1) / count, null));
+        }
+        else
+        {
+            List<double> edges = Edges(width);
+            for (int i = 0; i < edges.Count - 1; i++)
+                _columns.Add(new Column(edges[i], edges[i + 1], TextWithin(edges[i], edges[i + 1], width)));
+        }
+        foreach (Column column in _columns) TuneRise(column);
+    }
+
+    void TuneRise(Column column)
+    {
+        if (_hover == SeekHover.Wave) column.Rise.Tune(520, 16);
+        else column.Rise.Tune(420, 26);
+    }
+
+    string? TextWithin(double left, double right, double width)
+    {
+        for (int i = 0; i < Math.Min(_starts.Length, _texts.Length); i++)
+        {
+            double x = _starts[i] * width;
+            if (x >= left && x < right && !Lyric.IsWordless(_texts[i])) return _texts[i].Trim();
+        }
+        return null;
+    }
+
+    int ColumnAt(double x)
+    {
+        for (int i = 0; i < _columns.Count; i++)
+            if (x < _columns[i].Right) return i;
+        return _columns.Count - 1;
+    }
+
+    double RiseFor(Column column, double x) => _hover switch
+    {
+        SeekHover.Lift => _pointedColumn >= 0 && _columns[_pointedColumn] == column ? LiftThickness : RestThickness,
+        SeekHover.Wave => Raise(column) ? WaveThickness : RestThickness,
+        _ => _pointed ? RestThickness + BulgeThickness * Math.Exp(-Math.Pow(DistanceTo(column, x) / BulgeReach, 2)) : RestThickness,
+    };
+
+    double DistanceTo(Column column, double x) =>
+        Solid ? Math.Abs(column.Center - x) : Math.Max(0, Math.Max(column.Left - x, x - column.Right));
+
+    bool Raise(Column column)
+    {
+        if (_pointed && !column.Raised && _time - _enteredAt >= Math.Abs(column.Center - _enteredX) / WaveSpeed) column.Raised = true;
+        if (!_pointed && column.Raised && _time - _leftAt >= Math.Abs(column.Center - _leftX) / WaveSpeed) column.Raised = false;
+        return column.Raised;
+    }
+
+    double ThicknessOf(Column column) => Math.Max(MinThickness, Math.Max(_thickness, column.Rise.Value));
 
     List<double> Edges(double width)
     {
@@ -72,32 +228,116 @@ public sealed class LineBar : FrameworkElement
     {
         double width = ActualWidth, height = ActualHeight;
         if (width <= 0 || height <= 0) return;
+        if (_columnsStale || width != _columnsWidth) BuildColumns(width);
 
-        List<double> edges = Edges(width);
-        int last = edges.Count - 2;
-        double fill = Math.Clamp(_fill, 0, width);
+        double middle = height / 2, fill = Math.Clamp(_fill, 0, width);
+        if (Solid) RenderSolid(dc, width, middle, fill);
+        else RenderLines(dc, middle, fill);
+    }
+
+    void RenderSolid(DrawingContext dc, double width, double middle, double fill)
+    {
+        Geometry shape = SolidShape(width, middle);
+        dc.DrawGeometry(Shades.White(UnplayedOpacity), null, shape);
+        if (fill <= 0) return;
+
+        double radius = Math.Min(ThicknessOf(_columns[ColumnAt(fill)]) / 2, fill / 2);
+        var reach = new CombinedGeometry(GeometryCombineMode.Union,
+            new RectangleGeometry(new Rect(0, 0, Math.Max(0, fill - radius), ActualHeight)),
+            new RectangleGeometry(new Rect(fill - radius * 2, middle - radius, radius * 2, radius * 2), radius, radius));
+        dc.PushClip(reach);
+        dc.DrawGeometry(Brushes.White, null, shape);
+        dc.Pop();
+    }
+
+    Geometry SolidShape(double width, double middle)
+    {
+        double left = Math.Min(ThicknessOf(_columns[0]) / 2, width / 2);
+        double right = Math.Min(ThicknessOf(_columns[^1]) / 2, width / 2);
+        var shape = new StreamGeometry();
+        using (StreamGeometryContext outline = shape.Open())
+        {
+            outline.BeginFigure(new Point(left, middle - left), true, true);
+            foreach (Column column in _columns)
+                if (column.Center > left && column.Center < width - right)
+                    outline.LineTo(new Point(column.Center, middle - ThicknessOf(column) / 2), true, true);
+            outline.LineTo(new Point(width - right, middle - right), true, true);
+            outline.ArcTo(new Point(width - right, middle + right), new Size(right, right), 0, false, SweepDirection.Clockwise, true, true);
+            for (int i = _columns.Count - 1; i >= 0; i--)
+                if (_columns[i].Center > left && _columns[i].Center < width - right)
+                    outline.LineTo(new Point(_columns[i].Center, middle + ThicknessOf(_columns[i]) / 2), true, true);
+            outline.LineTo(new Point(left, middle + left), true, true);
+            outline.ArcTo(new Point(left, middle - left), new Size(left, left), 0, false, SweepDirection.Clockwise, true, true);
+        }
+        shape.Freeze();
+        return shape;
+    }
+
+    void RenderLines(DrawingContext dc, double middle, double fill)
+    {
+        int last = _columns.Count - 1;
         int current = 0;
-        while (current < last && edges[current + 1] <= fill) current++;
+        while (current < last && _columns[current + 1].Left <= fill) current++;
 
+        double focus = Math.Clamp(_focus.Value, 0, 1);
+        Color accent = Accent.Color;
         for (int i = 0; i <= last; i++)
         {
-            double left = edges[i] + (i > 0 ? MarkGap / 2 : 0), right = edges[i + 1] - (i < last ? MarkGap / 2 : 0);
+            Column column = _columns[i];
+            double left = column.Left + (i > 0 ? MarkGap / 2 : 0), right = column.Right - (i < last ? MarkGap / 2 : 0);
             if (right <= left) continue;
-            var segment = new Rect(left, 0, right - left, height);
-            double radius = Math.Min(height, segment.Width) / 2;
 
-            if (i != current)
+            double thick = ThicknessOf(column);
+            var segment = new Rect(left, middle - thick / 2, right - left, thick);
+            double radius = Math.Min(thick, segment.Width) / 2;
+            bool pointed = i == _pointedColumn;
+            double dim = pointed ? 1 : 1 - DimmedShare * focus;
+
+            if (i < current)
             {
-                dc.DrawRoundedRectangle(i < current ? Shades.White(PassedOpacity) : Unplayed, null, segment, radius, radius);
+                dc.DrawRoundedRectangle(Shades.White(PassedOpacity * dim), null, segment, radius, radius);
+                continue;
+            }
+            if (i > current)
+            {
+                double ahead = pointed ? UnplayedOpacity + (LitAheadOpacity - UnplayedOpacity) * focus : UnplayedOpacity;
+                dc.DrawRoundedRectangle(Shades.White(ahead), null, segment, radius, radius);
                 continue;
             }
 
-            Color accent = Accent.Color;
-            dc.DrawRoundedRectangle(_shades.Of(accent, AheadOpacity), null, segment, radius, radius);
+            dc.DrawRoundedRectangle(_shades.Of(accent, AheadOpacity * dim), null, segment, radius, radius);
             if (fill <= left) continue;
-            dc.PushClip(new RectangleGeometry(new Rect(0, 0, fill, height)));
-            dc.DrawRoundedRectangle(_shades.Of(accent, 1), null, segment, radius, radius);
+            dc.PushClip(new RectangleGeometry(new Rect(0, 0, fill, ActualHeight)));
+            dc.DrawRoundedRectangle(_shades.Of(accent, dim), null, segment, radius, radius);
             dc.Pop();
         }
+
+        RenderTip(dc, middle);
+    }
+
+    void RenderTip(DrawingContext dc, double middle)
+    {
+        double shown = Math.Clamp(_tipShown.Value, 0, 1);
+        if (shown < 0.01 || _tipText.Length == 0) return;
+
+        double width = ActualWidth;
+        var typeface = new Typeface((FontFamily)GetValue(TextElement.FontFamilyProperty), FontStyles.Normal, FontWeights.Medium, FontStretches.Normal);
+        var text = new FormattedText(_tipText, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface,
+            TipFontSize, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip)
+        {
+            MaxTextWidth = Math.Max(1, width - TipPadding * 2),
+            MaxLineCount = 1,
+            Trimming = TextTrimming.CharacterEllipsis,
+        };
+
+        double tipWidth = Math.Min(width, text.WidthIncludingTrailingWhitespace + TipPadding * 2);
+        double center = Math.Clamp(_tipX.Value, tipWidth / 2, width - tipWidth / 2);
+        double bottom = middle - LiftThickness / 2 - TipLift + (1 - shown) * TipRise;
+        var pill = new Rect(center - tipWidth / 2, bottom - TipHeight, tipWidth, TipHeight);
+
+        dc.PushOpacity(shown);
+        dc.DrawRoundedRectangle(TipBack, null, pill, TipHeight / 2, TipHeight / 2);
+        dc.DrawText(text, new Point(pill.X + TipPadding, pill.Y + (TipHeight - text.Height) / 2));
+        dc.Pop();
     }
 }

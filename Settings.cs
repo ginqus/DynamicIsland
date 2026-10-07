@@ -26,6 +26,13 @@ enum Hover
     Flow,
 }
 
+enum SeekHover
+{
+    Magnifier,
+    Lift,
+    Wave,
+}
+
 static class Settings
 {
     const string Key = @"Software\DynamicIsland";
@@ -41,6 +48,7 @@ static class Settings
     static Backdrop _backdrop = (Backdrop)Math.Clamp(Read(nameof(Backdrop), 0), 0, (int)Backdrop.MatrixAndStars);
     static LyricChange _lyricChange = (LyricChange)Math.Clamp(Read(nameof(LyricChange), (int)LyricChange.Wave), 0, (int)LyricChange.Drum);
     static Hover _hover = (Hover)Math.Clamp(Read(nameof(Hover), 0), 0, (int)Hover.Flow);
+    static SeekHover _seekHover = (SeekHover)Math.Clamp(Read(nameof(SeekHover), 0), 0, (int)SeekHover.Wave);
     static int _scale = Math.Clamp(Read(nameof(Scale), DefaultScale), MinScale, MaxScale);
     static int _gap = Math.Clamp(Read(nameof(Gap), DefaultGap), 0, MaxGap);
     static int _accent = Read(nameof(Accent), 0);
@@ -79,6 +87,12 @@ static class Settings
     {
         get => _hover;
         set => Write(nameof(Hover), (int)(_hover = value));
+    }
+
+    public static SeekHover SeekHover
+    {
+        get => _seekHover;
+        set => Write(nameof(SeekHover), (int)(_seekHover = value));
     }
 
     public static bool Lyrics

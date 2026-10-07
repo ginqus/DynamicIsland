@@ -10,7 +10,7 @@ public partial class MainWindow
 {
     const double UpdatePagePadding = 14;
     const int MegabyteShift = 20;
-    const double LookHeight = 448, LookTilesHeight = 72;
+    const double LookHeight = 488, LookTilesHeight = 72;
     const int LargestScale = 130, ScaleStep = 5;
     const int LargestGap = 24, GapStep = 2;
 
@@ -193,6 +193,12 @@ public partial class MainWindow
         SyncSeekStyle(true);
     }
 
+    void SeekHover_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.SeekHover = (SeekHover)SeekHoverSegments.PickUnderPointer();
+        RefreshLookPage();
+    }
+
     void BackdropRow_Click(object sender, RoutedEventArgs e) => ToggleLookTiles(BackdropTiles);
 
     void LyricChangeRow_Click(object sender, RoutedEventArgs e) => ToggleLookTiles(LyricChangeTiles);
@@ -265,6 +271,7 @@ public partial class MainWindow
         GapSlider.Set(Settings.Gap, LookView.IsVisible);
         DotsSegments.Set(Settings.Dots ? 1 : 0, LookView.IsVisible);
         SeekStyleSegments.Set(Settings.LineBar ? 1 : 0, LookView.IsVisible);
+        SeekHoverSegments.Set((int)Settings.SeekHover, LookView.IsVisible);
         GlassSwitch.Set(Settings.Glass, LookView.IsVisible);
         ((RadioButton)BackdropStrip.Children[(int)Settings.Backdrop]).IsChecked = true;
         ((RadioButton)LyricChangeStrip.Children[(int)Settings.LyricChange]).IsChecked = true;
