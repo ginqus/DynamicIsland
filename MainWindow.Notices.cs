@@ -10,7 +10,10 @@ public partial class MainWindow
     const double NoticeSeconds = 3.2;
     static readonly TimeSpan NoticeIconDelay = TimeSpan.FromMilliseconds(160);
 
-    void Notify(Glyph icon, SolidColorBrush tint, string title, string text, double seconds = NoticeSeconds, bool force = false, Glyph? from = null, bool warn = false)
+    Action? _noticeOpen;
+
+    void Notify(Glyph icon, SolidColorBrush tint, string title, string text, double seconds = NoticeSeconds, bool force = false, Glyph? from = null, bool warn = false,
+        Action? open = null)
     {
         if (_ringing && !force) return;
 
@@ -21,6 +24,7 @@ public partial class MainWindow
         NoticeBack.Background = new SolidColorBrush(Color.FromArgb((byte)(color.A * NoticeBackgroundAlpha), color.R, color.G, color.B));
         NoticeTitle.Text = title;
         NoticeText.Text = text;
+        _noticeOpen = open;
         ShowTransient(View.Notice, seconds, force);
         if (shown) FadeIn(NoticeView);
         AnimateNoticeIcon(icon, from, warn);

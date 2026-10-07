@@ -25,6 +25,8 @@ sealed class HoverPreview : FrameworkElement
     static readonly Geometry Arrow = Shades.Frozen(Geometry.Parse("M7,4 V18.6 L10.6,15.2 L13,20.4 L15.6,19.2 L13.2,14.1 H18.2 Z"));
     static readonly Pen ArrowEdge = Shades.Frozen(new Pen(Brushes.Black, 1.6) { LineJoin = PenLineJoin.Round });
 
+    static readonly Color[] Whites = [Colors.White, Colors.White, Colors.White];
+
     readonly Liquid _liquid = new();
     readonly FrameLoop _loop;
     ButtonBase? _tile;
@@ -67,7 +69,7 @@ sealed class HoverPreview : FrameworkElement
         else (_pointer, pressed) = (Mouse.GetPosition(this), Mouse.LeftButton == MouseButtonState.Pressed);
 
         int over = Array.FindIndex(targets, target => target.Contains(_pointer));
-        _liquid.Aim(targets, over, _pointer, pressed);
+        _liquid.Aim(targets, Whites, over, _pointer, pressed);
         _liquid.Advance(dt);
         InvalidateVisual();
         return IsVisible;

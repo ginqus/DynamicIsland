@@ -8,6 +8,9 @@ namespace DynamicIsland;
 
 public sealed class Puddle : Grid
 {
+    public static readonly DependencyProperty TintProperty = DependencyProperty.RegisterAttached(
+        "Tint", typeof(Color), typeof(Puddle), new PropertyMetadata(Colors.White));
+
     readonly Liquid _liquid = new();
     readonly FrameLoop _loop;
     ButtonBase[] _buttons = [];
@@ -43,9 +46,14 @@ public sealed class Puddle : Grid
         Rect[] targets = [.. _buttons.Select(button => button.TransformToAncestor(this).TransformBounds(new Rect(button.RenderSize)))];
         int over = Array.FindIndex(_buttons, button => button.IsMouseOver);
         _liquid.Style = Settings.Hover;
-        _liquid.Aim(targets, over, Mouse.GetPosition(this), over >= 0 && _buttons[over].IsPressed);
+        Color[] tints = [.. _buttons.Select(GetTint)];
+        _liquid.Aim(targets, tints, over, Mouse.GetPosition(this), over >= 0 && _buttons[over].IsPressed);
         _loop.Start();
     }
+
+    public static Color GetTint(DependencyObject element) => (Color)element.GetValue(TintProperty);
+
+    public static void SetTint(DependencyObject element, Color tint) => element.SetValue(TintProperty, tint);
 
     bool Advance(double dt)
     {

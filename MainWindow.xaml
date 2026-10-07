@@ -432,6 +432,13 @@
                                   HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
                 </Grid>
 
+                <Grid x:Name="RecordView" Width="132" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <Ellipse x:Name="RecordDot" Width="10" Height="10" Fill="{StaticResource Red}"
+                             HorizontalAlignment="Left" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                    <local:Digits x:Name="RecordText" Text="0:00" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource Red}"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                </Grid>
+
                 <Grid x:Name="LoadingView" Width="118" Height="34" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:Ring x:Name="LoadingRing" Width="18" Height="18" Progress="0" Stroke="{StaticResource Orange}"
                                 RenderTransformOrigin="0.5,0.5"
@@ -713,7 +720,61 @@
                     </StackPanel>
                 </Grid>
 
-                <Grid x:Name="MenuView" Width="300" Height="248" HorizontalAlignment="Center" VerticalAlignment="Top">
+                <Grid x:Name="RecordBigView" Width="340" Height="92" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <local:Puddle HorizontalAlignment="Left" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Style="{StaticResource IconButton}" Width="50" Height="50" local:Puddle.Tint="#FF453A" Click="RecordStop_Click">
+                            <Grid Width="50" Height="50">
+                                <Ellipse Fill="{StaticResource Red}" Opacity="0.25"/>
+                                <Rectangle Width="16" Height="16" RadiusX="4" RadiusY="4" Fill="{StaticResource Red}"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="RecordPauseButton" Style="{StaticResource IconButton}" Width="50" Height="50" Margin="10,0,0,0" Click="RecordPause_Click">
+                            <Grid Width="50" Height="50">
+                                <Ellipse x:Name="RecordPauseDisc" Fill="#2EFFFFFF"/>
+                                <Path x:Name="RecordPauseIcon" Data="M1,1 H5 V15 H1 Z M10,1 H14 V15 H10 Z" Fill="White" Stroke="White"
+                                      StrokeThickness="2" StrokeLineJoin="Round"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Path x:Name="RecordResumeIcon" Data="M2,1 L13,8 L2,15 Z" Margin="3,0,0,0" Opacity="0"
+                                      Fill="{StaticResource Orange}" Stroke="{StaticResource Orange}"
+                                      StrokeThickness="2" StrokeLineJoin="Round"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+                    </local:Puddle>
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,26,2">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Ellipse x:Name="RecordBigDot" Width="7" Height="7" Fill="{StaticResource Red}"
+                                     VerticalAlignment="Center" Margin="0,1,6,0"/>
+                            <TextBlock x:Name="RecordBigLabel" Text="OBS · Запись" FontSize="12" Opacity="0.8"/>
+                        </StackPanel>
+                        <local:Digits x:Name="RecordBigTime" Text="0:00" FontSize="40" FontWeight="SemiBold"
+                                      FontFamily="{StaticResource Display}"
+                                      HorizontalAlignment="Right" Margin="0,-4,0,0"/>
+                        <TextBlock x:Name="RecordInfo" FontSize="11" Foreground="{StaticResource Dim}" HorizontalAlignment="Right"
+                                   MaxWidth="180" TextTrimming="CharacterEllipsis" Margin="0,-2,0,0"/>
+                    </StackPanel>
+                </Grid>
+
+                <Grid x:Name="RecordSetView" Width="320" Height="92" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <StackPanel Margin="26,0,20,2" VerticalAlignment="Center" HorizontalAlignment="Left">
+                        <TextBlock x:Name="RecordSetCaption" Text="OBS" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="RecordSetTitle" Text="Не пишет" FontSize="21" FontWeight="SemiBold"
+                                   FontFamily="{StaticResource Display}" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                    <Button x:Name="RecordStart" Style="{StaticResource ChipButton}" Width="118" Height="40" Margin="0,0,20,0"
+                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                            Background="{StaticResource Red}" Foreground="Black" FontSize="13.5" FontWeight="SemiBold"
+                            Click="RecordStart_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="10" Height="10" Fill="Black" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Text="Записать" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Grid x:Name="MenuView" Width="300" Height="288" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,14,10,0">
                         <TextBlock Style="{StaticResource Caption}" Text="DYNAMIC ISLAND" Margin="12,0,0,6"/>
                         <Button Style="{StaticResource RowButton}" Click="TimerRow_Click">
@@ -722,6 +783,16 @@
                                 <TextBlock Style="{StaticResource RowLabel}" Text="Таймер"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <local:Digits x:Name="MenuTimer" VerticalAlignment="Center"/>
+                                    <local:Icon Style="{StaticResource RowChevron}" Margin="8,1,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource RowButton}" Click="RecordRow_Click">
+                            <Grid>
+                                <local:Icon x:Name="MenuRecordIcon" Style="{StaticResource RowIcon}" Kind="Record"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Запись OBS"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <local:Digits x:Name="MenuRecord" Foreground="{StaticResource Red}" VerticalAlignment="Center"/>
                                     <local:Icon Style="{StaticResource RowChevron}" Margin="8,1,0,0"/>
                                 </StackPanel>
                             </Grid>
@@ -1102,6 +1173,12 @@
                 </TransformGroup>
             </Border.RenderTransform>
             <Grid x:Name="BubbleBody" ClipToBounds="True">
+                <Grid x:Name="BubbleRecord" Width="76" HorizontalAlignment="Left">
+                    <Ellipse x:Name="BubbleRecordDot" Width="9" Height="9" Fill="{StaticResource Red}"
+                             HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                    <local:Digits x:Name="BubbleRecordText" Text="0:00" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Red}"
+                                  HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                </Grid>
                 <Grid x:Name="BubbleTimer" Width="76" HorizontalAlignment="Left">
                     <local:Ring x:Name="BubbleRing" Width="16" Height="16"
                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,0"/>

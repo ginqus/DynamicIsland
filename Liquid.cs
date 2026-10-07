@@ -77,8 +77,11 @@ sealed class Liquid
     readonly Spring _tailX = new(0, 190, 20), _tailY = new(0, 190, 20);
     readonly Spring _size = new(0, 420, 28);
     readonly Spring[] _flow;
+    readonly Shades _flowShades = new();
+    Shades[] _shades = [];
     Blob[] _blobs = [];
     Rect[] _targets = [];
+    Color[] _tints = [];
     Hover _style;
 
     public Liquid() => _flow = [_headX, _headY, _tailX, _tailY, _size];
@@ -110,13 +113,15 @@ sealed class Liquid
         _size.Snap(0);
     }
 
-    public void Aim(Rect[] targets, int over, Point pointer, bool pressed)
+    public void Aim(Rect[] targets, Color[] tints, int over, Point pointer, bool pressed)
     {
         bool fresh = targets.Length != _blobs.Length;
         _targets = targets;
+        _tints = tints;
         if (fresh)
         {
             _blobs = [.. targets.Select(target => new Blob(Center(target)))];
+            _shades = [.. targets.Select(_ => new Shades())];
             Rest();
         }
 
@@ -216,39 +221,58 @@ sealed class Liquid
             for (int i = 0; i < _blobs.Length; i++)
             {
                 double shown = Math.Min(_blobs[i].Shown.Value, 1), r = Radius(_targets[i]) * _blobs[i].Size.Value;
-                if (shown > Gone && r > Gone) dc.DrawEllipse(Shades.White(Fill * shown), null, Center(_targets[i]), r, r);
+                if (shown > Gone && r > Gone) dc.DrawEllipse(_shades[i].Of(_tints[i], Fill * shown), null, Center(_targets[i]), r, r);
             }
             return;
         }
 
-        Geometry? body = _style == Hover.Flow ? FlowBody() : MagnetBody();
-        if (body != null) dc.DrawGeometry(Shades.White(Fill), null, body);
+        if (_style == Hover.Flow)
+        {
+            if (FlowBody() is { } flow) dc.DrawGeometry(_flowShades.Of(TintAt(_headX.Value), Fill), null, flow);
+            return;
+        }
+        for (int i = 0; i < _blobs.Length; i++)
+            if (MagnetBody(i) is { } body) dc.DrawGeometry(_shades[i].Of(_tints[i], Fill), null, body);
     }
 
-    Geometry? MagnetBody()
+    Geometry? MagnetBody(int i)
     {
         Geometry? body = null;
-        for (int i = 0; i < _blobs.Length; i++)
-        {
-            Blob blob = _blobs[i];
-            double radius = Radius(_targets[i]), tear = radius * MagnetTear;
-            double reach = Math.Min((blob.Drops[0].At - blob.At).Length / radius, 1);
-            double r = radius * blob.Size.Value * (1 - Squeeze * reach);
-            if (r > Gone) Join(ref body, new EllipseGeometry(blob.At, r, r));
+        Blob blob = _blobs[i];
+        double radius = Radius(_targets[i]), tear = radius * MagnetTear;
+        double reach = Math.Min((blob.Drops[0].At - blob.At).Length / radius, 1);
+        double r = radius * blob.Size.Value * (1 - Squeeze * reach);
+        if (r > Gone) Join(ref body, new EllipseGeometry(blob.At, r, r));
 
-            Drop? previous = null;
-            foreach (Drop drop in blob.Drops)
-            {
-                double dr = drop.Size.Value;
-                if (dr <= Gone) continue;
-                Join(ref body, new EllipseGeometry(drop.At, dr, dr));
-                if (r > Gone && Goo.Neck(blob.At, r, drop.At, dr, tear) is { } stem) Join(ref body, stem);
-                if (previous != null && Goo.Neck(previous.At, previous.Size.Value, drop.At, dr, tear) is { } link) Join(ref body, link);
-                previous = drop;
-            }
+        Drop? previous = null;
+        foreach (Drop drop in blob.Drops)
+        {
+            double dr = drop.Size.Value;
+            if (dr <= Gone) continue;
+            Join(ref body, new EllipseGeometry(drop.At, dr, dr));
+            if (r > Gone && Goo.Neck(blob.At, r, drop.At, dr, tear) is { } stem) Join(ref body, stem);
+            if (previous != null && Goo.Neck(previous.At, previous.Size.Value, drop.At, dr, tear) is { } link) Join(ref body, link);
+            previous = drop;
         }
         return body;
     }
+
+    Color TintAt(double x)
+    {
+        if (_tints.Length == 0) return Colors.White;
+        for (int i = 1; i < _targets.Length; i++)
+        {
+            double from = Center(_targets[i - 1]).X, to = Center(_targets[i]).X;
+            if (x >= to) continue;
+            return Mix(_tints[i - 1], _tints[i], Math.Clamp((x - from) / (to - from), 0, 1));
+        }
+        return _tints[^1];
+    }
+
+    static Color Mix(Color a, Color b, double share) => share <= 0 ? a : share >= 1 ? b : Color.FromArgb(
+        Blend(a.A, b.A, share), Blend(a.R, b.R, share), Blend(a.G, b.G, share), Blend(a.B, b.B, share));
+
+    static byte Blend(byte a, byte b, double share) => (byte)Math.Round(a + (b - a) * share);
 
     Geometry? FlowBody()
     {

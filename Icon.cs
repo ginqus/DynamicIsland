@@ -8,7 +8,7 @@ public enum Glyph
 {
     Mute, Quiet, Mid, Loud, Headphones, Speaker, Vpn, Offline, Wifi, Wired, Bell, Note, Battery, Minus, Plus, Chevron, Back,
     Clock, Gear, Lines, Sparkle, Rim, Expand, Windows, Power, Look, Size, Gap, Drop, Moon, Tray, Cross, Bolt, VpnOff, Bars, Update,
-    Segments, Stars, Pointer,
+    Segments, Stars, Pointer, Record, Folder,
 }
 
 public sealed class Icon : FrameworkElement
@@ -108,6 +108,9 @@ public sealed class Icon : FrameworkElement
         [Glyph.Tray] = new(Lines: "M4,13.5 L6.4,6.2 A1.6,1.6 0 0 1 7.9,5.1 H16.1 A1.6,1.6 0 0 1 17.6,6.2 L20,13.5 V17.6 A2,2 0 0 1 18,19.6"
             + " H6 A2,2 0 0 1 4,17.6 Z M4,13.5 H8.6 L9.8,15.6 H14.2 L15.4,13.5 H20"),
         [Glyph.Cross] = new(Lines: "M7.5,7.5 L16.5,16.5 M16.5,7.5 L7.5,16.5", Line: 2.6),
+        [Glyph.Record] = new("M12,8.2 A3.8,3.8 0 1 0 12,15.8 A3.8,3.8 0 1 0 12,8.2 Z", "M12,3.8 A8.2,8.2 0 1 0 12,20.2 A8.2,8.2 0 1 0 12,3.8 Z"),
+        [Glyph.Folder] = new("M3.6,6.6 A1.6,1.6 0 0 1 5.2,5 H9.4 L11.4,7 H18.8 A1.6,1.6 0 0 1 20.4,8.6 V17.4 A1.6,1.6 0 0 1 18.8,19 H5.2"
+            + " A1.6,1.6 0 0 1 3.6,17.4 Z"),
     };
 
     static readonly Dictionary<Glyph, Geometry> Outlines = [];

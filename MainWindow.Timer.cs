@@ -177,6 +177,21 @@ public partial class MainWindow
         UpdateTargets();
     }
 
+    Panel BubblePanelAt(double x)
+    {
+        var parts = new List<(double Width, Panel Panel)>();
+        if (_bubbleRecord.Target > 0) parts.Add((RecordBubbleWidth, Panel.Record));
+        if (_bubbleTimer.Target > 0) parts.Add((TimerBubbleWidth, Panel.Timer));
+        if (_bubbleShelf.Target > 0) parts.Add((_shelfBubbleWidth.Value, Panel.Shelf));
+        double end = 0;
+        foreach ((double width, Panel panel) in parts.SkipLast(1))
+        {
+            end += width - BubbleOverlap;
+            if (x < end + BubbleOverlap / 2) return panel;
+        }
+        return parts.Count > 0 ? parts[^1].Panel : Panel.None;
+    }
+
     void Bubble_MouseEnter(object sender, MouseEventArgs e)
     {
         _bubbleHovered = true;
@@ -201,8 +216,7 @@ public partial class MainWindow
         if (!_bubblePressed) return;
         e.Handled = true;
         _bubblePressed = false;
-        bool timer = _bubbleTimer.Target > 0 && (_bubbleShelf.Target == 0 || e.GetPosition(Bubble).X < TimerBubbleWidth - BubbleOverlap / 2);
-        SelectPanel(timer ? Panel.Timer : Panel.Shelf);
+        SelectPanel(BubblePanelAt(e.GetPosition(Bubble).X));
         UpdateView();
         UpdateTargets();
         _collapseTimeout.Start(LongCollapseDelay);

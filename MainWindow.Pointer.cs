@@ -118,8 +118,14 @@ public partial class MainWindow
 
     void ToggleOpen()
     {
+        if (_view == View.Notice && _noticeOpen is { } open)
+        {
+            open();
+            EndTransient();
+            return;
+        }
         if (_ringing || _panel != Panel.None) SelectPanel(Panel.None);
-        else SelectPanel(IsMediaActive || !_countdown.IsActive ? Panel.Player : Panel.Timer);
+        else SelectPanel(IsMediaActive ? Panel.Player : _obs.Recording ? Panel.Record : _countdown.IsActive ? Panel.Timer : Panel.Player);
         UpdateView();
     }
 

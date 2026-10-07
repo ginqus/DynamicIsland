@@ -13,9 +13,9 @@ namespace DynamicIsland;
 
 public partial class MainWindow : Window
 {
-    enum View { Idle, Media, Timer, Volume, Charge, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, Menu, Settings, Look, Shelf, Update, Loading }
+    enum View { Idle, Media, Timer, Record, Volume, Charge, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, RecordBig, RecordSet, Menu, Settings, Look, Shelf, Update, Loading }
 
-    enum Panel { None, Player, Timer, TimerSet, Menu, Settings, Look, Shelf, Update }
+    enum Panel { None, Player, Timer, TimerSet, Record, Menu, Settings, Look, Shelf, Update }
 
     readonly record struct PillShape(double Width, double Height, double Radius);
 
@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         [View.Idle] = new(118, 34, 17),
         [View.Media] = new(210, 34, 17),
         [View.Timer] = new(132, 34, 17),
+        [View.Record] = new(132, 34, 17),
         [View.Volume] = new(250, 34, 17),
         [View.Charge] = new(230, 34, 17),
         [View.Focus] = new(236, 34, 17),
@@ -33,7 +34,9 @@ public partial class MainWindow : Window
         [View.IdleBig] = new(320, 124, 38),
         [View.TimerBig] = new(330, 92, 40),
         [View.TimerSet] = new(300, 190, 38),
-        [View.Menu] = new(300, 248, 34),
+        [View.RecordBig] = new(340, 92, 40),
+        [View.RecordSet] = new(320, 92, 40),
+        [View.Menu] = new(300, 288, 34),
         [View.Settings] = new(320, 374, 34),
         [View.Look] = new(352, LookHeight, 34),
         [View.Shelf] = new(380, 136, 34),
@@ -55,7 +58,7 @@ public partial class MainWindow : Window
         [View.MediaBig] = new(20, 20, 64, 22, 52, 38, 26, 1),
     };
 
-    static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.Shelf];
+    static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.RecordSet, View.RecordBig, View.Shelf];
 
     const double HostWidth = 620, HostHeight = 520;
     const double CompactMaxHeight = 40;
@@ -105,6 +108,7 @@ public partial class MainWindow : Window
             [View.Idle] = IdleView,
             [View.Media] = MediaView,
             [View.Timer] = TimerView,
+            [View.Record] = RecordView,
             [View.Volume] = VolumeView,
             [View.Charge] = ChargeView,
             [View.Focus] = FocusView,
@@ -114,6 +118,8 @@ public partial class MainWindow : Window
             [View.IdleBig] = IdleBigView,
             [View.TimerBig] = TimerBigView,
             [View.TimerSet] = TimerSetView,
+            [View.RecordBig] = RecordBigView,
+            [View.RecordSet] = RecordSetView,
             [View.Menu] = MenuView,
             [View.Settings] = SettingsView,
             [View.Look] = LookView,
@@ -124,10 +130,11 @@ public partial class MainWindow : Window
         _spotSprings = [_coverLeft, _coverTop, _coverSize, _barsRight, _barsCenterY, _barsWidth, _barsHeight, _barsOpen];
         _springs =
         [
-            _width, _height, _radius, _scale, _offsetY, _userScale, _topGap, _bubbleSplit, _bubbleScale, _bubbleTimer, _bubbleShelf, _shelfBubbleWidth,
+            _width, _height, _radius, _scale, _offsetY, _userScale, _topGap, _bubbleSplit, _bubbleScale, _bubbleRecord, _bubbleTimer, _bubbleShelf, _shelfBubbleWidth,
             _shelfScroll, _volumeOvershoot, _leanX, _coverScale, .. _spotSprings,
         ];
         _timerTint = new SolidColorBrush(_orange.Color);
+        _recordTint = new SolidColorBrush(_red.Color);
         _lyricBlock = LyricA;
 
         _forcedView = Enum.TryParse(Argument("--view"), true, out View forced) ? forced : null;
@@ -152,9 +159,12 @@ public partial class MainWindow : Window
         _shelf = new Shelf(Dispatcher);
         _shelf.Changed += SyncShelf;
         _shelf.PictureLoaded += OnShelfPictureLoaded;
+        _obs.Changed += OnObsChanged;
+        _obs.Saved += OnRecordingSaved;
 
         PrepareViews();
         ApplyTimerTint();
+        ApplyRecordTint();
         TuneDragSprings(false);
         _ticker.Tick += (_, _) => OnTick();
         Loaded += OnLoaded;
@@ -244,6 +254,7 @@ public partial class MainWindow : Window
         RefreshUpdatePage();
         SyncAccent(false);
         SyncShelf();
+        SyncRecord();
         SyncGlass(false);
         PlayIntro();
         _ticker.Start();
@@ -254,6 +265,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { App.Log(ex); }
         try { await _network.StartAsync(); }
         catch (Exception ex) { App.Log(ex); }
+        _obs.Start();
     }
 
     void CenterOnScreen()
@@ -291,6 +303,7 @@ public partial class MainWindow : Window
         if (_ticks % HeadsetReadTicks == 1) ReadHeadset(_audio.Device);
         UpdateLyric();
         UpdateTimer();
+        UpdateRecord();
         if (_ticks % FullscreenCheckTicks == 0)
         {
             CheckFullscreen();
@@ -317,10 +330,11 @@ public partial class MainWindow : Window
             Panel.Update => View.Update,
             Panel.Shelf => View.Shelf,
             Panel.TimerSet => View.TimerSet,
+            Panel.Record => _obs.Recording ? View.RecordBig : View.RecordSet,
             Panel.Timer when _countdown.IsActive => View.TimerBig,
             Panel.Timer or Panel.Player => _media.HasTrack ? View.MediaBig : View.IdleBig,
             _ => _transientView ?? (_updater.State == Updater.Stage.Loading ? View.Loading
-                : IsMediaActive ? View.Media : _countdown.IsActive ? View.Timer : View.Idle),
+                : IsMediaActive ? View.Media : _obs.Recording ? View.Record : _countdown.IsActive ? View.Timer : View.Idle),
         };
         return target == View.Toast && !_media.HasTrack ? View.Idle : target;
     }
