@@ -17,7 +17,7 @@ public sealed class LineBar : FrameworkElement
     const double MinThickness = 2, RestThickness = 6;
     const double BulgeThickness = 8, BulgeReach = 28;
     const double LiftThickness = 12, LitAheadOpacity = 0.45, DimmedShare = 0.45;
-    const double WaveThickness = 10, WaveSpeed = 420;
+    const double WaveThickness = 10, WaveSpeed = 800;
     const double TipFontSize = 12, TipPadding = 10, TipHeight = 22, TipLift = 4, TipRise = 4;
 
     static readonly Brush TipBack = Shades.Frozen(new SolidColorBrush(Color.FromArgb(0xF0, 0x24, 0x24, 0x24)));
@@ -36,8 +36,11 @@ public sealed class LineBar : FrameworkElement
         public bool Raised { get; set; }
     }
 
+    readonly record struct Ripple(double At, double From, bool Swelling);
+
     readonly Shades _shades = new();
     readonly List<Column> _columns = [];
+    readonly List<Ripple> _ripples = [];
     readonly Spring _focus = new(0, 300, 30), _tipShown = new(0, 300, 30), _tipX = new(0, 420, 32);
 
     double[] _starts = [];
@@ -46,8 +49,8 @@ public sealed class LineBar : FrameworkElement
     double _columnsWidth = -1;
     bool _columnsStale = true;
     SeekHover _hover = SeekHover.Magnifier;
-    double _time, _enteredAt, _leftAt, _enteredX, _leftX, _lastX;
-    bool _pointed;
+    double _time, _lastX;
+    bool _pointed, _swollen;
     int _pointedColumn = -1;
     string _tipText = "";
 
@@ -110,6 +113,8 @@ public sealed class LineBar : FrameworkElement
         if (hover != _hover)
         {
             _hover = hover;
+            _ripples.Clear();
+            _pointed = _swollen = false;
             foreach (Column column in _columns)
             {
                 column.Raised = false;
@@ -123,8 +128,7 @@ public sealed class LineBar : FrameworkElement
         if (pointed != _pointed)
         {
             _pointed = pointed;
-            if (pointed) (_enteredAt, _enteredX) = (_time, x);
-            else (_leftAt, _leftX) = (_time, _lastX);
+            _ripples.Add(new Ripple(_time, x, pointed));
         }
         if (pointed) _lastX = x;
         _pointedColumn = pointed ? ColumnAt(x) : -1;
@@ -134,6 +138,7 @@ public sealed class LineBar : FrameworkElement
             column.Rise.Target = RiseFor(column, x);
             column.Rise.Advance(dt);
         }
+        ForgetPassedRipples(width);
 
         bool lifting = _hover == SeekHover.Lift && _pointedColumn >= 0;
         string? text = lifting ? _columns[_pointedColumn].Text : null;
@@ -167,12 +172,25 @@ public sealed class LineBar : FrameworkElement
             for (int i = 0; i < edges.Count - 1; i++)
                 _columns.Add(new Column(edges[i], edges[i + 1], TextWithin(edges[i], edges[i + 1], width)));
         }
-        foreach (Column column in _columns) TuneRise(column);
+        foreach (Column column in _columns)
+        {
+            column.Raised = _swollen;
+            TuneRise(column);
+        }
+    }
+
+    void ForgetPassedRipples(double width)
+    {
+        while (_ripples.Count > 0 && _time - _ripples[0].At >= width / WaveSpeed)
+        {
+            _swollen = _ripples[0].Swelling;
+            _ripples.RemoveAt(0);
+        }
     }
 
     void TuneRise(Column column)
     {
-        if (_hover == SeekHover.Wave) column.Rise.Tune(520, 16);
+        if (_hover == SeekHover.Wave) column.Rise.Tune(520, 20);
         else column.Rise.Tune(420, 26);
     }
 
@@ -205,8 +223,12 @@ public sealed class LineBar : FrameworkElement
 
     bool Raise(Column column)
     {
-        if (_pointed && !column.Raised && _time - _enteredAt >= Math.Abs(column.Center - _enteredX) / WaveSpeed) column.Raised = true;
-        if (!_pointed && column.Raised && _time - _leftAt >= Math.Abs(column.Center - _leftX) / WaveSpeed) column.Raised = false;
+        for (int i = _ripples.Count - 1; i >= 0; i--)
+        {
+            if (_time - _ripples[i].At < Math.Abs(column.Center - _ripples[i].From) / WaveSpeed) continue;
+            column.Raised = _ripples[i].Swelling;
+            break;
+        }
         return column.Raised;
     }
 
