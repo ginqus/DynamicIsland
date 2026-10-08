@@ -25,6 +25,8 @@ public sealed class CompactLyric : FrameworkElement
 
     const double WordTurnMs = 300, WordStepMs = 35;
 
+    const int MaxClusters = 2;
+
     readonly record struct Pose(double Opacity, double Y, double ScaleX, double ScaleY, double Blur);
 
     sealed class TurnEase(bool rising) : EasingFunctionBase
@@ -38,7 +40,7 @@ public sealed class CompactLyric : FrameworkElement
         protected override Freezable CreateInstanceCore() => new TurnEase(rising);
     }
 
-    sealed class Piece(DrawingVisual visual, Brush fill, ScaleTransform size, TranslateTransform shift)
+    sealed class Piece(Brush fill, ScaleTransform size, TranslateTransform shift)
     {
         public void Glide(Pose from, Pose to, TimeSpan wait, TimeSpan run, IEasingFunction travel, IEasingFunction swell, IEasingFunction fade)
         {
@@ -46,18 +48,28 @@ public sealed class CompactLyric : FrameworkElement
             shift.BeginAnimation(TranslateTransform.YProperty, Delayed(from.Y, to.Y, wait, run, travel));
             size.BeginAnimation(ScaleTransform.ScaleXProperty, Delayed(from.ScaleX, to.ScaleX, wait, run, swell));
             size.BeginAnimation(ScaleTransform.ScaleYProperty, Delayed(from.ScaleY, to.ScaleY, wait, run, swell));
-            if (from.Blur == to.Blur) return;
+        }
+    }
 
-            var blur = new BlurEffect { Radius = from.Blur };
-            visual.Effect = blur;
-            DoubleAnimationUsingKeyFrames change = Delayed(from.Blur, to.Blur, wait, run, fade);
-            if (to.Blur == 0)
+    sealed class Cluster(ContainerVisual visual, Piece[] pieces)
+    {
+        BlurEffect? _blur;
+
+        public Piece[] Pieces => pieces;
+
+        public void Haze(double from, double to, TimeSpan wait, TimeSpan run, IEasingFunction fade)
+        {
+            BlurEffect blur = _blur = new BlurEffect { Radius = from };
+            visual.Effect = null;
+            var change = new DoubleAnimation(from, to, run) { BeginTime = wait, EasingFunction = fade };
+            change.CurrentStateInvalidated += (clock, _) =>
             {
-                change.Completed += (_, _) =>
-                {
-                    if (ReferenceEquals(visual.Effect, blur)) visual.Effect = null;
-                };
-            }
+                if (ReferenceEquals(_blur, blur) && ((Clock)clock!).CurrentState == ClockState.Active) visual.Effect = blur;
+            };
+            change.Completed += (_, _) =>
+            {
+                if (ReferenceEquals(visual.Effect, blur)) visual.Effect = null;
+            };
             blur.BeginAnimation(BlurEffect.RadiusProperty, change);
         }
     }
@@ -73,7 +85,8 @@ public sealed class CompactLyric : FrameworkElement
     static readonly IEasingFunction TurnCosine = new TurnEase(false) { EasingMode = EasingMode.EaseIn };
 
     readonly VisualCollection _visuals;
-    Piece[] _pieces = [];
+    Cluster[] _clusters = [];
+    int _pieceCount;
     Size _size;
     LyricChange _change;
 
@@ -102,7 +115,10 @@ public sealed class CompactLyric : FrameworkElement
         _change = shown.Any(letter => letter is >= FirstJoinedLetter and <= LastJoinedLetter) ? LyricChange.Smooth : change;
 
         _visuals.Clear();
-        _pieces = [.. Split(shown, _change).Select(part => CreatePiece(whole, shown, part.Start, part.Length, brush))];
+        (int Start, int Length)[] parts = [.. Split(shown, _change)];
+        _pieceCount = parts.Length;
+        int clusterSize = Math.Max((parts.Length + MaxClusters - 1) / MaxClusters, 1);
+        _clusters = [.. parts.Chunk(clusterSize).Select(cluster => CreateCluster(whole, shown, cluster, brush))];
         InvalidateMeasure();
     }
 
@@ -160,11 +176,18 @@ public sealed class CompactLyric : FrameworkElement
         IEasingFunction travel, IEasingFunction swell, IEasingFunction fade)
     {
         TimeSpan run = TimeSpan.FromMilliseconds(runMs);
-        for (int i = 0; i < _pieces.Length; i++)
-            _pieces[i].Glide(from, to, TimeSpan.FromMilliseconds(waitMs + i * stepMs), run, travel, swell, fade);
+        int started = 0;
+        foreach (Cluster cluster in _clusters)
+        {
+            TimeSpan wait = TimeSpan.FromMilliseconds(waitMs + started * stepMs);
+            TimeSpan spread = TimeSpan.FromMilliseconds((cluster.Pieces.Length - 1) * stepMs);
+            foreach (Piece piece in cluster.Pieces)
+                piece.Glide(from, to, TimeSpan.FromMilliseconds(waitMs + started++ * stepMs), run, travel, swell, fade);
+            if (from.Blur != to.Blur) cluster.Haze(from.Blur, to.Blur, wait, run + spread, fade);
+        }
     }
 
-    double StepWithin(double longestMs, double spreadMs) => Math.Min(longestMs, spreadMs / Math.Max(_pieces.Length, 1));
+    double StepWithin(double longestMs, double spreadMs) => Math.Min(longestMs, spreadMs / Math.Max(_pieceCount, 1));
 
     static IEnumerable<(int Start, int Length)> Split(string text, LyricChange change)
     {
@@ -177,7 +200,14 @@ public sealed class CompactLyric : FrameworkElement
             .Where(letter => !char.IsWhiteSpace(text[letter.start]));
     }
 
-    Piece CreatePiece(FormattedText whole, string text, int start, int length, Brush brush)
+    Cluster CreateCluster(FormattedText whole, string text, (int Start, int Length)[] parts, Brush brush)
+    {
+        var visual = new ContainerVisual();
+        _visuals.Add(visual);
+        return new Cluster(visual, [.. parts.Select(part => CreatePiece(visual, whole, text, part.Start, part.Length, brush))]);
+    }
+
+    Piece CreatePiece(ContainerVisual cluster, FormattedText whole, string text, int start, int length, Brush brush)
     {
         Rect box = whole.BuildHighlightGeometry(new Point(), start, length)?.Bounds ?? new Rect();
         Brush fill = brush.Clone();
@@ -186,8 +216,8 @@ public sealed class CompactLyric : FrameworkElement
         var visual = new DrawingVisual { Transform = new TransformGroup { Children = { size, shift } } };
         TextOptions.SetTextHintingMode(visual, TextHintingMode.Animated);
         using (DrawingContext dc = visual.RenderOpen()) dc.DrawText(Format(text.Substring(start, length), fill), new Point(box.Left, 0));
-        _visuals.Add(visual);
-        return new Piece(visual, fill, size, shift);
+        cluster.Children.Add(visual);
+        return new Piece(fill, size, shift);
     }
 
     string Fit(string text, double maxWidth)
