@@ -101,6 +101,7 @@ sealed class MediaService
         _manager.SessionsChanged += (_, _) => _ui.InvokeAsync(AttachSession);
         AttachSession();
         WatchBar();
+        WatchPlayback();
     }
 
     public bool SwitchSession(int direction)
@@ -258,6 +259,7 @@ sealed class MediaService
 
     void OnTimeline(Session session, TimelinePropertiesChangedEventArgs e) => _ui.InvokeAsync(() =>
     {
+        ReadPlayback();
         ReadTimeline();
         Changed?.Invoke();
     });
@@ -326,19 +328,22 @@ sealed class MediaService
         }
     }
 
-    void ReadPlayback()
+    bool ReadPlayback()
     {
-        if (_session == null) return;
+        if (_session == null) return false;
         try
         {
             var info = _session.GetPlaybackInfo();
             Status status = info.PlaybackStatus;
             bool playing = status == Status.Playing;
-            if (playing != IsPlaying)
+            double rate = info.PlaybackRate is double told && told > 0 ? told : 1;
+            bool changed = playing != IsPlaying || rate != _rate || status != _status;
+            if (playing != IsPlaying || rate != _rate)
             {
                 _position = Position;
                 _positionAt = DateTime.UtcNow;
                 IsPlaying = playing;
+                _rate = rate;
             }
             if (status != _status)
             {
@@ -346,14 +351,17 @@ sealed class MediaService
                 if (IsLive) _bar.ResetRetry();
                 else ForgetBar();
             }
-            _rate = info.PlaybackRate ?? 1;
+            return changed;
         }
-        catch { }
+        catch
+        {
+            return false;
+        }
     }
 
-    void ReadTimeline()
+    bool ReadTimeline()
     {
-        if (_session == null) return;
+        if (_session == null) return false;
         try
         {
             var timeline = _session.GetTimelineProperties();
@@ -361,18 +369,33 @@ sealed class MediaService
             if (_noTimeline)
             {
                 UpdateBarDuration();
-                return;
+                return false;
             }
 
-            _duration = timeline.EndTime - timeline.StartTime;
-            if (timeline.LastUpdatedTime == _timelineStamp) return;
+            TimeSpan duration = timeline.EndTime - timeline.StartTime;
+            bool resized = duration != _duration;
+            _duration = duration;
+            if (timeline.LastUpdatedTime == _timelineStamp) return resized;
 
             _timelineStamp = timeline.LastUpdatedTime;
             _position = timeline.Position - timeline.StartTime;
             DateTime updated = timeline.LastUpdatedTime.UtcDateTime;
             _positionAt = updated.Year < UnsetYear ? DateTime.UtcNow : updated;
+            return true;
         }
-        catch { }
+        catch
+        {
+            return false;
+        }
+    }
+
+    async void WatchPlayback()
+    {
+        while (true)
+        {
+            await Task.Delay(IsPlaying ? PollPlayingMs : PollPausedMs);
+            if (ReadPlayback() | ReadTimeline()) Changed?.Invoke();
+        }
     }
 
     async void WatchBar()

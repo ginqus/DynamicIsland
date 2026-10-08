@@ -579,10 +579,9 @@
                         <Border x:Name="SeekArea" Grid.Column="1" Background="Transparent" Cursor="Hand"
                                 MouseLeftButtonDown="Seek_MouseLeftButtonDown" MouseMove="Seek_MouseMove"
                                 MouseLeftButtonUp="Seek_MouseLeftButtonUp" LostMouseCapture="Seek_LostMouseCapture">
-                            <Grid x:Name="SeekBar" Height="6" VerticalAlignment="Center">
-                                <Border x:Name="SeekBack" CornerRadius="3" Background="#33FFFFFF"/>
-                                <Border x:Name="SeekFill" CornerRadius="3" Background="White" HorizontalAlignment="Left" Width="0"/>
-                                <local:LineBar x:Name="SeekLines" Opacity="0"/>
+                            <Grid>
+                                <local:LineBar x:Name="SeekPlain" Solid="True" IsHitTestVisible="False"/>
+                                <local:LineBar x:Name="SeekLines" Opacity="0" IsHitTestVisible="False"/>
                             </Grid>
                         </Border>
                         <local:Digits x:Name="RemText" Grid.Column="2" Text="–:––" FontSize="11" Foreground="{StaticResource Dim}"
@@ -758,7 +757,7 @@
                 </Grid>
 
                 <Grid x:Name="RecordSetView" Width="320" Height="92" HorizontalAlignment="Center" VerticalAlignment="Top">
-                    <StackPanel Margin="26,0,20,2" VerticalAlignment="Center" HorizontalAlignment="Left">
+                    <StackPanel x:Name="RecordSetWords" Margin="26,0,26,2" VerticalAlignment="Center" HorizontalAlignment="Left">
                         <TextBlock x:Name="RecordSetCaption" Text="OBS" FontSize="12" Opacity="0.8" TextTrimming="CharacterEllipsis"/>
                         <TextBlock x:Name="RecordSetTitle" Text="Не пишет" FontSize="21" FontWeight="SemiBold"
                                    FontFamily="{StaticResource Display}" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
@@ -939,7 +938,7 @@
                     </StackPanel>
                 </Grid>
 
-                <Grid x:Name="LookView" Width="352" Height="448" HorizontalAlignment="Center" VerticalAlignment="Top">
+                <Grid x:Name="LookView" Width="352" Height="488" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <local:RowList Margin="10,8,10,0">
                         <Button Style="{StaticResource BackButton}" Content="ОФОРМЛЕНИЕ" Click="SettingsBack_Click"/>
                         <Button x:Name="SizeRow" Style="{StaticResource RowButton}">
@@ -981,6 +980,13 @@
                                 <local:Icon Style="{StaticResource RowIcon}" Kind="Segments"/>
                                 <TextBlock Style="{StaticResource RowLabel}" Text="Полоса трека"/>
                                 <local:Segments x:Name="SeekStyleSegments" Style="{StaticResource RowSegments}" Labels="Сплошная|По строкам"/>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource RowButton}" Click="SeekHover_Click">
+                            <Grid>
+                                <local:Icon Style="{StaticResource RowIcon}" Kind="Bulge"/>
+                                <TextBlock Style="{StaticResource RowLabel}" Text="Под курсором"/>
+                                <local:Segments x:Name="SeekHoverSegments" Style="{StaticResource RowSegments}" Labels="Лупа|Строка|Волна"/>
                             </Grid>
                         </Button>
                         <Button Style="{StaticResource RowButton}" Click="BackdropRow_Click">

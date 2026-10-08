@@ -9,7 +9,7 @@ namespace DynamicIsland;
 public partial class MainWindow
 {
     const double SeekTrackWidth = 260;
-    const double SeekHeight = 6, SeekHoverHeight = 9, SeekDragHeight = 12, MinSeekHeight = 2;
+    const double SeekHeight = 6, SeekDragHeight = 12, MinSeekHeight = 2;
     const double SeekSettledFraction = 0.02;
     const double SeekHoldSeconds = 1;
     const int NoSeconds = -1;
@@ -44,14 +44,15 @@ public partial class MainWindow
 
         double track = SeekArea.ActualWidth > 0 ? SeekArea.ActualWidth : SeekTrackWidth;
         _seekFill.Target = track * shown;
-        _seekHeight.Target = _scrubbing ? SeekDragHeight : SeekArea.IsMouseOver ? SeekHoverHeight : SeekHeight;
+        _seekHeight.Target = _scrubbing ? SeekDragHeight : SeekHeight;
         _seekFill.Advance(dt);
         _seekHeight.Advance(dt);
 
-        double thick = Math.Max(_seekHeight.Value, MinSeekHeight);
-        SeekBar.Height = thick;
-        SeekBack.CornerRadius = SeekFill.CornerRadius = new CornerRadius(thick / 2);
-        SeekFill.Width = SeekLines.Fill = Math.Clamp(_seekFill.Value, 0, track);
+        SeekPlain.Thickness = SeekLines.Thickness = Math.Max(_seekHeight.Value, MinSeekHeight);
+        SeekPlain.Fill = SeekLines.Fill = Math.Clamp(_seekFill.Value, 0, track);
+        double? pointer = SeekArea.IsMouseOver || _scrubbing ? Mouse.GetPosition(SeekLines).X : null;
+        SeekPlain.Advance(dt, pointer, Settings.SeekHover);
+        SeekLines.Advance(dt, pointer, Settings.SeekHover);
         MarkLineStarts(duration);
         FillSungLine();
         AdvancePlayerLyrics(now, dt);
@@ -73,7 +74,8 @@ public partial class MainWindow
         _seekLinesFrom = _playerLines;
         _seekLinesSpan = duration;
         double seconds = duration.TotalSeconds;
-        SeekLines.SetStarts(seconds < 1 ? [] : _playerLines.Select(line => line.Time.TotalSeconds / seconds).ToArray());
+        SeekLines.SetLines(seconds < 1 ? [] : _playerLines.Select(line => line.Time.TotalSeconds / seconds).ToArray(),
+            _playerLines.Select(line => line.Text).ToArray());
         SyncSeekStyle(true);
     }
 
@@ -85,8 +87,7 @@ public partial class MainWindow
         _seekLined = lined;
         Duration time = Ms(animate ? 260 : 0);
         SeekLines.BeginAnimation(OpacityProperty, new DoubleAnimation(lined ? 1 : 0, time));
-        foreach (UIElement plain in new UIElement[] { SeekBack, SeekFill })
-            plain.BeginAnimation(OpacityProperty, new DoubleAnimation(lined ? 0 : 1, time));
+        SeekPlain.BeginAnimation(OpacityProperty, new DoubleAnimation(lined ? 0 : 1, time));
     }
 
     static string FormatTime(TimeSpan t) =>
