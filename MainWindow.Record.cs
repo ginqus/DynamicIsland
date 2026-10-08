@@ -75,6 +75,21 @@ public partial class MainWindow
         RecordStart.SetVisible(_obs.IsReady);
         RecordStart.IsEnabled = !_obs.Busy;
         RecordStart.Opacity = _obs.Busy ? PausedOpacity : 1;
+        RecordSetWords.HorizontalAlignment = _obs.IsReady ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+        RecordSetCaption.TextAlignment = RecordSetTitle.TextAlignment = _obs.IsReady ? TextAlignment.Left : TextAlignment.Center;
+        FitRecordSetPage();
+    }
+
+    void FitRecordSetPage()
+    {
+        double widest = PillShapes[View.RecordSet].Width;
+        RecordSetWords.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double hugging = Math.Ceiling(RecordSetWords.DesiredSize.Width / 2) * 2;
+        double width = _obs.IsReady ? widest : Math.Min(hugging, widest);
+        if (width == RecordSetView.Width) return;
+
+        RecordSetView.Width = width;
+        if (_view == View.RecordSet) _morphing = true;
     }
 
     string DescribeRecording()
