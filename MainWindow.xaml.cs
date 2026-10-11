@@ -60,7 +60,7 @@ public partial class MainWindow : Window
 
     static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.RecordSet, View.RecordBig, View.Shelf];
 
-    const double HostWidth = 620, HostHeight = 520;
+    const double HostWidth = 620, HostHeight = 592;
     const double CompactMaxHeight = 40;
     const double BarelyVisible = 0.05;
     const double IntroScale = 0.3, IntroOffset = -50;
@@ -166,7 +166,7 @@ public partial class MainWindow : Window
         ApplyTimerTint();
         ApplyRecordTint();
         TuneDragSprings(false);
-        _ticker.Tick += (_, _) => OnTick();
+        _ticker.Tick += (_, _) => TickSafely();
         Loaded += OnLoaded;
     }
 
@@ -294,6 +294,18 @@ public partial class MainWindow : Window
         Root.BeginAnimation(OpacityProperty, fade);
         _scale.Target = _bubbleScale.Target = 0.5;
         StartShapeLoop();
+    }
+
+    void TickSafely()
+    {
+        try
+        {
+            OnTick();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
     }
 
     void OnTick()
