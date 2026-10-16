@@ -28,6 +28,7 @@ public partial class MainWindow
     readonly Spring _scale = new(1, 320, 20), _offsetY = new(0, 260, 26), _leanX = new(0);
     readonly Spring _userScale = new(Settings.Scale / 100.0, 240, 26), _topGap = new(Settings.Gap, 240, 26);
     readonly Spring _bubbleSplit = new(0), _bubbleScale = new(1, 320, 20);
+    readonly Spring _lyricSnapX = new(0, 200, 28), _lyricSnapY = new(0, 200, 28);
     readonly Spring _bubbleRecord = new(0, 260, 24), _bubbleTimer = new(0, 260, 24), _bubbleShelf = new(0, 260, 24), _shelfBubbleWidth = new(ShelfBubbleWidth, 260, 24);
     readonly BlurEffect _motionBlur = new() { Radius = 0, RenderingBias = RenderingBias.Performance };
     readonly FrameLoop _shapeLoop;
@@ -51,6 +52,7 @@ public partial class MainWindow
         {
             _coverTop.Target = spot.CoverTop + pull / 2;
             _barsCenterY.Target = spot.BarsCenterY + pull / 2;
+            AimCoverAtWholePixels(spot, shape.Width);
         }
         if (dragging) TuneDragSprings(true);
         UpdateBubbleTargets(compact);
@@ -108,7 +110,7 @@ public partial class MainWindow
         foreach (Spring spring in _springs) moving |= spring.Advance(dt);
         ApplyShape();
         if (!moving) EndMorph();
-        return moving;
+        return moving || IsLyricSettling;
     }
 
     void ApplyShape()
@@ -141,12 +143,35 @@ public partial class MainWindow
         RootSize.ScaleX = RootSize.ScaleY = size;
         RootMove.Y = _offsetY.Value + _topGap.Value / size;
         RootLean.X = Math.Round(_leanX.Value * size * dpi) / (size * dpi);
-        double sharp = size * scale * dpi;
-        if (Math.Abs(_lyricCache.RenderAtScale - sharp) > CacheScaleTolerance) _lyricCache.RenderAtScale = sharp;
+        SharpenLyricCache(dpi);
 
-        PlaceCoverAndBars(pill, dpi);
+        PlaceCoverAndBars(pill);
         PlaceBubble(pill, r, scale);
         CutGlass(dpi);
+    }
+
+    void SharpenLyricCache(double dpi)
+    {
+        double sharp = Math.Max(_userScale.Target, MinScale) * dpi;
+        if (Math.Abs(_lyricCache.RenderAtScale - sharp) > CacheScaleTolerance) _lyricCache.RenderAtScale = sharp;
+        AimLyricAtWholePixels(dpi);
+    }
+
+    bool IsLyricSettling => _lyricSnapX.Value != _lyricSnapX.Target || _lyricSnapY.Value != _lyricSnapY.Target;
+
+    void AimLyricAtWholePixels(double dpi)
+    {
+        if (_view == View.Media && LyricBox.IsVisible && Root.TransformToAncestor(this) is Transform place)
+        {
+            Point inIsland = LyricBox.TranslatePoint(new Point(-LyricSnap.X, -LyricSnap.Y), Island);
+            Matrix toWindow = place.Value;
+            Point unscaled = toWindow.Transform(inIsland + VisualTreeHelper.GetOffset(Island));
+            double pixelsPerUnit = Math.Max(toWindow.M11, MinScale) * dpi;
+            _lyricSnapX.Target = (Math.Round(unscaled.X * dpi) - unscaled.X * dpi) / pixelsPerUnit;
+            _lyricSnapY.Target = (Math.Round(unscaled.Y * dpi) - unscaled.Y * dpi) / pixelsPerUnit;
+        }
+        LyricSnap.X = _lyricSnapX.Value;
+        LyricSnap.Y = _lyricSnapY.Value;
     }
 
     static Geometry Around(Geometry hole)

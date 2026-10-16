@@ -27,6 +27,7 @@ public partial class MainWindow
     readonly Spring _coverLeft = new(0), _coverTop = new(0), _coverSize = new(FullCoverSize);
     readonly Spring _barsRight = new(0), _barsCenterY = new(0), _barsWidth = new(1), _barsHeight = new(1), _barsOpen = new(0);
     readonly Spring _coverScale = new(1);
+    readonly Spring _coverSnapX = new(0, 200, 28), _coverSnapY = new(0, 200, 28);
     readonly Spring[] _spotSprings;
     readonly FrameLoop _eqLoop;
     ImageSource? _cover;
@@ -188,19 +189,31 @@ public partial class MainWindow
 
     void FitMediaViews(double w, double h)
     {
-        if (_view == View.Media) MediaView.Width = w;
+        if (_view == View.Media)
+        {
+            MediaView.Width = w;
+            CentreLyrics();
+        }
         if (_view != View.MediaBig) return;
 
         MediaBigView.Height = Math.Max(h, PlayerHeight);
         PlayerLyricBox.Opacity = Math.Clamp((h - PlayerHeight) / PlayerLyricsHeight * 2 - 1, 0, 1);
     }
 
-    void PlaceCoverAndBars(Rect pill, double dpi)
+    void AimCoverAtWholePixels(MediaSpot rest, double restWidth)
+    {
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleY;
+        double left = (HostWidth - restWidth) / 2 + rest.CoverLeft;
+        _coverSnapX.Target = Math.Round(left * dpi) / dpi - left;
+        _coverSnapY.Target = Math.Round(rest.CoverTop * dpi) / dpi - rest.CoverTop;
+    }
+
+    void PlaceCoverAndBars(Rect pill)
     {
         double art = Math.Max(_coverSize.Value, 1), back = art * (1 - _coverScale.Value) / 2;
         ArtSize.ScaleX = ArtSize.ScaleY = Math.Max(art * _coverScale.Value, 1) / FullCoverSize;
-        ArtMove.X = Math.Round((pill.Left + _coverLeft.Value) * dpi) / dpi + back;
-        ArtMove.Y = Math.Round(_coverTop.Value * dpi) / dpi + back;
+        ArtMove.X = pill.Left + _coverLeft.Value + _coverSnapX.Value + back;
+        ArtMove.Y = _coverTop.Value + _coverSnapY.Value + back;
 
         double eqW = Math.Max(_barsWidth.Value, 1), eqH = Math.Max(_barsHeight.Value, 1);
         Eq.Width = eqW;

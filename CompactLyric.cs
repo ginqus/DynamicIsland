@@ -93,12 +93,16 @@ public sealed class CompactLyric : FrameworkElement
     public CompactLyric()
     {
         _visuals = new VisualCollection(this);
-        RenderTransform = Offset;
+        RenderTransform = new TransformGroup { Children = { Offset, Centring } };
     }
 
     public string Text { get; private set; } = "";
 
     public TranslateTransform Offset { get; } = new();
+
+    public TranslateTransform Centring { get; } = new();
+
+    public double IslandWidth { get; set; }
 
     protected override int VisualChildrenCount => _visuals.Count;
 

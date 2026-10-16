@@ -14,6 +14,10 @@ public partial class MainWindow
     const int LargestScale = 130, ScaleStep = 5;
     const int LargestGap = 24, GapStep = 2;
 
+    const int FirstSourceRow = 1;
+
+    static readonly string[] SourceNames = ["LRCLIB", "Deezer", "NetEase", "QQ Music", "Kugou", "Paxsenix"];
+
     Border? _openLookTiles;
 
     void SettingsRow_Click(object sender, RoutedEventArgs e) => ShowPanelAndCheckUpdate(Panel.Settings);
@@ -44,6 +48,21 @@ public partial class MainWindow
     void Lyrics_Click(object sender, RoutedEventArgs e)
     {
         Settings.Lyrics = !Settings.Lyrics;
+        UpdateSwitches(true);
+        TrackLyrics();
+    }
+
+    void SourcesRow_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Sources);
+
+    void SourcesBack_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Settings);
+
+    void Source_Click(object sender, RoutedEventArgs e)
+    {
+        var picked = (LyricSource)(1 << SourceRows.Children.IndexOf((UIElement)sender) - FirstSourceRow);
+        LyricSource left = Settings.LyricSources ^ picked;
+        if (left == 0) return;
+
+        Settings.LyricSources = left;
         UpdateSwitches(true);
         TrackLyrics();
     }
@@ -96,8 +115,14 @@ public partial class MainWindow
         AppVolumeSwitch.Set(Settings.AppVolume, animate);
         AppSpectrumSwitch.Set(Settings.AppSpectrum, animate);
         NetworkSwitch.Set(Settings.Network, animate);
+        WeatherSwitch.Set(Settings.Weather, animate);
         FullscreenSwitch.Set(Settings.HideFullscreen, animate);
         AutostartSwitch.Set(Autostart.Enabled, animate);
+
+        Toggle[] sources = [LrclibSwitch, DeezerSwitch, NetEaseSwitch, QqMusicSwitch, KugouSwitch, PaxsenixSwitch];
+        string[] chosen = SourceNames.Where((_, i) => Settings.LyricSources.HasFlag((LyricSource)(1 << i))).ToArray();
+        for (int i = 0; i < sources.Length; i++) sources[i].Set(Settings.LyricSources.HasFlag((LyricSource)(1 << i)), animate);
+        SourcesText.Text = chosen.Length == sources.Length ? "Все" : chosen.Length == 1 ? chosen[0] : $"{chosen.Length} из {sources.Length}";
     }
 
     async void Update_Click(object sender, RoutedEventArgs e)

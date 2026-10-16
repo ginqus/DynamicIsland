@@ -8,7 +8,7 @@ public enum Glyph
 {
     Mute, Quiet, Mid, Loud, Headphones, Speaker, Vpn, Offline, Wifi, Wired, Bell, Note, Battery, Minus, Plus, Chevron, Back,
     Clock, Gear, Lines, Sparkle, Rim, Expand, Windows, Power, Look, Size, Gap, Drop, Moon, Tray, Cross, Bolt, VpnOff, Bars, Update,
-    Segments, Stars, Pointer, Record, Folder, Bulge,
+    Segments, Stars, Pointer, Record, Folder, Bulge, Sun, Cloud, CloudSun, Rain, Snow, Storm, Fog, Qr, Pin, Search, Check,
 }
 
 public sealed class Icon : FrameworkElement
@@ -54,8 +54,18 @@ public sealed class Icon : FrameworkElement
         new(Cut: "M8.6,11.9 L11,14.3 L15.6,9.4", Drawn: true),
     ];
 
+    const string HighCloud = "M7.2,15 A3.9,3.9 0 0 1 6.7,7.25 A5.4,5.4 0 0 1 17,6.5 A4.3,4.3 0 0 1 16.8,15 Z";
+    const string LowCloud = "M6.6,20 A3.3,3.3 0 0 1 6.2,13.45 A4.6,4.6 0 0 1 15,12.8 A3.7,3.7 0 0 1 14.8,20 Z";
+    static readonly Piece[] CloudSunPieces =
+    [
+        new("M16.4,5.6 A3,3 0 1 0 16.4,11.6 A3,3 0 1 0 16.4,5.6 Z",
+            "M16.4,2.3 V3.3 M21.7,8.6 H22.7 M12.65,4.85 L11.95,4.15 M20.15,4.85 L20.85,4.15 M20.15,12.35 L20.85,13.05", 1.7),
+        new(LowCloud, Cut: LowCloud, Gap: 4.2),
+    ];
+
     static readonly Dictionary<Glyph, (Piece[] Pieces, int Mask)> Composite = new()
     {
+        [Glyph.CloudSun] = (CloudSunPieces, 0b11),
         [Glyph.Mute] = (SoundPieces, 0b10001),
         [Glyph.Quiet] = (SoundPieces, 0b00011),
         [Glyph.Mid] = (SoundPieces, 0b00111),
@@ -115,8 +125,22 @@ public sealed class Icon : FrameworkElement
             + " H6 A2,2 0 0 1 4,17.6 Z M4,13.5 H8.6 L9.8,15.6 H14.2 L15.4,13.5 H20", 2.2),
         [Glyph.Cross] = new(Lines: "M7.5,7.5 L16.5,16.5 M16.5,7.5 L7.5,16.5", Line: 2.6),
         [Glyph.Record] = new("M12,8.2 A3.8,3.8 0 1 0 12,15.8 A3.8,3.8 0 1 0 12,8.2 Z", "M12,3.9 A8.1,8.1 0 1 0 12,20.1 A8.1,8.1 0 1 0 12,3.9 Z", 2.2),
+        [Glyph.Sun] = new("M12,8 A4,4 0 1 0 12,16 A4,4 0 1 0 12,8 Z", "M12,2.6 V4.4 M12,19.6 V21.4 M2.6,12 H4.4 M19.6,12 H21.4"
+            + " M5.35,5.35 L6.6,6.6 M17.4,17.4 L18.65,18.65 M5.35,18.65 L6.6,17.4 M17.4,6.6 L18.65,5.35"),
+        [Glyph.Cloud] = new("M7.2,18.4 A3.9,3.9 0 0 1 6.7,10.65 A5.4,5.4 0 0 1 17,9.9 A4.3,4.3 0 0 1 16.8,18.4 Z"),
+        [Glyph.Rain] = new(HighCloud, "M8.2,18 L7.2,21 M12.4,18 L11.4,21 M16.6,18 L15.6,21", 1.8),
+        [Glyph.Snow] = new(HighCloud + " M7.6,18.6 A0.8,0.8 0 1 0 7.6,20.2 A0.8,0.8 0 1 0 7.6,18.6 Z"
+            + " M12,18.6 A0.8,0.8 0 1 0 12,20.2 A0.8,0.8 0 1 0 12,18.6 Z M16.4,18.6 A0.8,0.8 0 1 0 16.4,20.2 A0.8,0.8 0 1 0 16.4,18.6 Z"),
+        [Glyph.Storm] = new(HighCloud + " M12.5,16.8 L10.1,20.2 H11.8 L11.5,22.7 L13.9,19.3 H12.2 Z"),
+        [Glyph.Fog] = new(HighCloud, "M5.5,18.4 H18.5 M8,21.6 H16", 1.8),
+        [Glyph.Qr] = new("M14.3,14.3 H15.9 V15.9 H14.3 Z M18.1,14.3 H19.7 V15.9 H18.1 Z M18.1,18.1 H19.7 V19.7 H18.1 Z",
+            "M4.6,4.6 H9.8 V9.8 H4.6 Z M14.2,4.6 H19.4 V9.8 H14.2 Z M4.6,14.2 H9.8 V19.4 H4.6 Z", 1.8),
         [Glyph.Folder] = new("M3.6,6.6 A1.6,1.6 0 0 1 5.2,5 H9.4 L11.4,7 H18.8 A1.6,1.6 0 0 1 20.4,8.6 V17.4 A1.6,1.6 0 0 1 18.8,19 H5.2"
             + " A1.6,1.6 0 0 1 3.6,17.4 Z"),
+        [Glyph.Pin] = new("M12,2.8 C8.3,2.8 5.4,5.6 5.4,9.3 C5.4,14 12,21.2 12,21.2 C12,21.2 18.6,14 18.6,9.3 C18.6,5.6 15.7,2.8 12,2.8 Z",
+            Cut: "M12,9.3 L12.01,9.3", Gap: 5),
+        [Glyph.Search] = new(Lines: "M10.6,4.4 A6.2,6.2 0 1 0 10.6,16.8 A6.2,6.2 0 1 0 10.6,4.4 Z M15.2,15.2 L19.8,19.8", Line: 2.2),
+        [Glyph.Check] = new(Lines: "M5.2,12.6 L9.8,17.2 L18.8,7.2", Line: 2.6),
     };
 
     static readonly Dictionary<Glyph, Geometry> Outlines = [];

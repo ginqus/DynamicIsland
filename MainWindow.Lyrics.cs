@@ -36,7 +36,7 @@ public partial class MainWindow
         public double DueAt { get; set; }
     }
 
-    readonly BitmapCache _lyricCache = new() { SnapsToDevicePixels = true };
+    readonly BitmapCache _lyricCache = new();
     LyricsService.Line[] _lyricLines = [];
     int _lyricIndex = -1;
     string _lyricTitle = "";
@@ -53,7 +53,7 @@ public partial class MainWindow
 
     TimeSpan LyricTime => _media.Position + LyricLead;
 
-    void TrackLyrics() => _lyrics.Track(Settings.Lyrics && _media.HasTrack ? _media.Title : "", _media.Artist);
+    void TrackLyrics() => _lyrics.Track(Settings.Lyrics && _media.HasTrack ? _media.Title : "", _media.Artist, Settings.LyricSources);
 
     void OnLyricsChanged()
     {
@@ -115,6 +115,8 @@ public partial class MainWindow
         _compactMediaWidth = text.Length == 0
             ? CompactMediaWidth
             : Math.Clamp(width + 2 * LyricFadeEdge + LyricInset, CompactMediaWidth, MaxCompactMediaWidth);
+        next.IslandWidth = _compactMediaWidth;
+        CentreLyrics();
         double box = _compactMediaWidth - LyricInset;
         double overflow = width - (box - 2 * LyricFadeEdge);
         if (!snap) _width.Tune(280, 30);
@@ -123,6 +125,14 @@ public partial class MainWindow
         next.Offset.X = overflow > 0 ? LyricFadeEdge : (box - width) / 2;
         next.Offset.BeginAnimation(TranslateTransform.XProperty, overflow > 0 ? CreateLyricScroll(overflow, seconds) : null);
         next.Enter();
+    }
+
+    void CentreLyrics()
+    {
+        MediaView.UpdateLayout();
+        double boxLeft = VisualTreeHelper.GetOffset(MediaView).X + VisualTreeHelper.GetOffset(LyricBox).X;
+        LyricA.Centring.X = (HostWidth - LyricA.IslandWidth) / 2 + LyricBox.Margin.Left - boxLeft;
+        LyricB.Centring.X = (HostWidth - LyricB.IslandWidth) / 2 + LyricBox.Margin.Left - boxLeft;
     }
 
     static DoubleAnimationUsingKeyFrames CreateLyricScroll(double overflow, double seconds)

@@ -13,9 +13,9 @@ namespace DynamicIsland;
 
 public partial class MainWindow : Window
 {
-    enum View { Idle, Media, Timer, Record, Volume, Charge, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, RecordBig, RecordSet, Menu, Settings, Look, Shelf, Update, Loading }
+    enum View { Idle, Media, Timer, Record, Volume, Charge, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, RecordBig, RecordSet, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Sources, Loading }
 
-    enum Panel { None, Player, Timer, TimerSet, Record, Menu, Settings, Look, Shelf, Update }
+    enum Panel { None, Player, Timer, TimerSet, Record, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Sources }
 
     readonly record struct PillShape(double Width, double Height, double Radius);
 
@@ -36,11 +36,15 @@ public partial class MainWindow : Window
         [View.TimerSet] = new(300, 190, 38),
         [View.RecordBig] = new(340, 92, 40),
         [View.RecordSet] = new(320, 92, 40),
-        [View.Menu] = new(300, 288, 34),
-        [View.Settings] = new(320, 414, 34),
+        [View.Menu] = new(300, 368, 34),
+        [View.Settings] = new(320, 494, 34),
         [View.Look] = new(352, LookHeight, 34),
         [View.Shelf] = new(380, 136, 34),
+        [View.Weather] = new(340, 190, 34),
+        [View.Place] = new(320, 200, 34),
+        [View.Qr] = new(320, 104, 34),
         [View.Update] = new(320, 150, 34),
+        [View.Sources] = new(320, 294, 34),
         [View.Loading] = new(118, 34, 17),
     };
 
@@ -58,7 +62,11 @@ public partial class MainWindow : Window
         [View.MediaBig] = new(20, 20, 64, 22, 52, 38, 26, 1),
     };
 
-    static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.RecordSet, View.RecordBig, View.Shelf];
+    static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.RecordSet, View.RecordBig, View.Shelf, View.Weather, View.Qr];
+
+    static readonly View[] SettingsPages = [View.Update, View.Sources];
+
+    static readonly View[] WeatherPages = [View.Place];
 
     const double HostWidth = 620, HostHeight = 592;
     const double CompactMaxHeight = 40;
@@ -124,14 +132,18 @@ public partial class MainWindow : Window
             [View.Settings] = SettingsView,
             [View.Look] = LookView,
             [View.Shelf] = ShelfView,
+            [View.Weather] = WeatherView,
+            [View.Place] = PlaceView,
+            [View.Qr] = QrView,
             [View.Update] = UpdatePage,
+            [View.Sources] = SourcesView,
             [View.Loading] = LoadingView,
         };
         _spotSprings = [_coverLeft, _coverTop, _coverSize, _barsRight, _barsCenterY, _barsWidth, _barsHeight, _barsOpen];
         _springs =
         [
             _width, _height, _radius, _scale, _offsetY, _userScale, _topGap, _bubbleSplit, _bubbleScale, _bubbleRecord, _bubbleTimer, _bubbleShelf, _shelfBubbleWidth,
-            _shelfScroll, _volumeOvershoot, _leanX, _coverScale, .. _spotSprings,
+            _shelfScroll, _volumeOvershoot, _leanX, _coverScale, _coverSnapX, _coverSnapY, _lyricSnapX, _lyricSnapY, .. _spotSprings,
         ];
         _timerTint = new SolidColorBrush(_orange.Color);
         _recordTint = new SolidColorBrush(_red.Color);
@@ -149,6 +161,7 @@ public partial class MainWindow : Window
         _awayTimeout = new DelayedAction(ReturnFromAway);
         _overshootTimeout = new DelayedAction(ReleaseVolumeOvershoot);
         _dragLeaveTimeout = new DelayedAction(OnDragLeft);
+        _placeSearch = new DelayedAction(SearchPlaces);
 
         _media = new MediaService(Dispatcher);
         _media.Changed += OnMediaChanged;
@@ -161,13 +174,16 @@ public partial class MainWindow : Window
         _shelf.PictureLoaded += OnShelfPictureLoaded;
         _obs.Changed += OnObsChanged;
         _obs.Saved += OnRecordingSaved;
+        _weather.Changed += SyncWeather;
 
         PrepareViews();
+        PrepareWeatherHours();
         ApplyTimerTint();
         ApplyRecordTint();
         TuneDragSprings(false);
         _ticker.Tick += (_, _) => TickSafely();
         Loaded += OnLoaded;
+        Deactivated += OnDeactivated;
     }
 
     void PrepareViews()
@@ -255,6 +271,7 @@ public partial class MainWindow : Window
         SyncAccent(false);
         SyncShelf();
         SyncRecord();
+        SyncWeather();
         SyncGlass(false);
         PlayIntro();
         _ticker.Start();
@@ -325,6 +342,7 @@ public partial class MainWindow : Window
         {
             UpdateClock();
             PollPower();
+            _ = _weather.RefreshAsync();
             Native.KeepOnTop(_hwnd);
             _glass.Place();
             if (_media.IsPlaying) _lastPlayedAt = DateTime.UtcNow;
@@ -340,7 +358,11 @@ public partial class MainWindow : Window
             Panel.Settings => View.Settings,
             Panel.Look => View.Look,
             Panel.Update => View.Update,
+            Panel.Sources => View.Sources,
             Panel.Shelf => View.Shelf,
+            Panel.Weather => View.Weather,
+            Panel.Place => View.Place,
+            Panel.Qr => View.Qr,
             Panel.TimerSet => View.TimerSet,
             Panel.Record => _obs.Recording ? View.RecordBig : View.RecordSet,
             Panel.Timer when _countdown.IsActive => View.TimerBig,
@@ -380,6 +402,8 @@ public partial class MainWindow : Window
 
         _morphing = true;
         SwitchView(_views[target], MenuDirection(previous, target));
+        if (target == View.Place) BeginTyping();
+        else if (previous == View.Place) EndTyping();
         MoveMediaSpot(previous, target, to);
         UpdateTargets();
     }
@@ -408,8 +432,11 @@ public partial class MainWindow : Window
     }
 
     static int MenuDirection(View from, View to) =>
-        from == View.Menu && MenuPages.Contains(to) || (from, to) == (View.Settings, View.Update) ? 1
-        : to == View.Menu && MenuPages.Contains(from) || (from, to) == (View.Update, View.Settings) ? -1 : 0;
+        IsPageOf(from, to) ? 1 : IsPageOf(to, from) ? -1 : 0;
+
+    static bool IsPageOf(View parent, View page) =>
+        parent == View.Menu && MenuPages.Contains(page) || parent == View.Settings && SettingsPages.Contains(page)
+        || parent == View.Weather && WeatherPages.Contains(page);
 
     PillShape ShapeOf(View view) => view switch
     {
@@ -417,6 +444,8 @@ public partial class MainWindow : Window
         View.MediaBig when _playerHasLyricRoom => PillShapes[view] with { Height = PlayerHeight + PlayerLyricsHeight },
         View.RecordSet => PillShapes[view] with { Width = RecordSetView.Width },
         View.Update => PillShapes[view] with { Height = UpdatePage.Height },
+        View.Weather => PillShapes[view] with { Height = WeatherView.Height },
+        View.Place => PillShapes[view] with { Height = PlaceView.Height },
         View.Look => PillShapes[view] with { Height = LookView.Height },
         _ => PillShapes[view],
     };
@@ -453,7 +482,7 @@ public partial class MainWindow : Window
 
     void Collapse()
     {
-        if (_hovered || _pickingFiles) return;
+        if (_hovered || _pickingFiles || IsTyping) return;
         ShowPanel(Panel.None);
     }
 

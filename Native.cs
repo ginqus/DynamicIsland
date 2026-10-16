@@ -71,6 +71,7 @@ static class Native
     static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern IntPtr GetDesktopWindow();
     [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
@@ -94,6 +95,10 @@ static class Native
 
     [DllImport("ntdll.dll")]
     static extern int NtQueryWnfStateData(ref ulong name, IntPtr type, IntPtr scope, out uint stamp, out int data, ref uint size);
+
+    public static IntPtr ForegroundWindow => GetForegroundWindow();
+
+    public static void BringForward(IntPtr hwnd) => SetForegroundWindow(hwnd);
 
     public static bool IsCtrlDown => GetAsyncKeyState(VK_CONTROL) < 0;
 
