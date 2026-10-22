@@ -17,6 +17,7 @@ sealed class MediaService
     const int MinPercentToMeasure = 10;
     const int PollPlayingMs = 250, PollPausedMs = 1000;
     const int UnsetYear = 2000;
+    const int BarMissesToForget = 3;
 
     readonly Dispatcher _ui;
     readonly PlayerBar _bar = new();
@@ -38,6 +39,7 @@ sealed class MediaService
     string _barText = "", _barTitle = "", _barArtist = "";
     TimeSpan _barTime = TimeSpan.MinValue;
     int _barPercent = -1;
+    int _barMisses;
     TimeSpan _measuredLength;
     TimeSpan _assumedLength;
 
@@ -150,7 +152,7 @@ sealed class MediaService
         {
             var target = TimeSpan.FromTicks((long)(_duration.Ticks * Math.Clamp(fraction, 0, 1)));
             TimeSpan start = session.GetTimelineProperties().StartTime;
-            if (await session.TryChangePlaybackPositionAsync((start + target).Ticks))
+            if (await session.TryChangePlaybackPositionAsync((start + target).Ticks) && ReferenceEquals(session, _session))
             {
                 _position = target;
                 _positionAt = DateTime.UtcNow;
@@ -394,7 +396,14 @@ sealed class MediaService
         while (true)
         {
             await Task.Delay(IsPlaying ? PollPlayingMs : PollPausedMs);
-            if (ReadPlayback() | ReadTimeline()) Changed?.Invoke();
+            try
+            {
+                if (ReadPlayback() | ReadTimeline()) Changed?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                App.Log(ex);
+            }
         }
     }
 
@@ -436,14 +445,15 @@ sealed class MediaService
                 int dash = bar.Text.IndexOf(BarSeparator, StringComparison.Ordinal);
                 (_barArtist, _barTitle) = dash > 0 ? (bar.Text[..dash], bar.Text[(dash + BarSeparator.Length)..]) : ("", bar.Text);
             }
-            if (bar.Time != _barTime)
+            _barMisses = 0;
+            if (bar.Time is { } time && time != _barTime)
             {
-                _barTime = _position = bar.Time;
+                _barTime = _position = time;
                 _positionAt = DateTime.UtcNow;
             }
             MeasureLength(bar.Percent);
         }
-        else if (_barFound)
+        else if (_barFound && ++_barMisses >= BarMissesToForget)
         {
             ForgetBar();
         }

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using static DynamicIsland.Motion;
@@ -8,17 +9,18 @@ namespace DynamicIsland;
 
 public partial class MainWindow
 {
-    const double UpdatePagePadding = 14;
+    const double UpdatePagePadding = 14, UpdateNotesWheelStep = 54;
     const int MegabyteShift = 20;
-    const double LookHeight = 488, LookTilesHeight = 72;
+    const double LookHeight = 430, LookTilesHeight = 72, LookWheelStep = 80;
+    const double LookEdgeZone = 70, LookEdgeScale = 0.8;
     const int LargestScale = 130, ScaleStep = 5;
     const int LargestGap = 24, GapStep = 2;
 
-    const int FirstSourceRow = 1;
-
-    static readonly string[] SourceNames = ["LRCLIB", "Deezer", "NetEase", "QQ Music", "Kugou", "Paxsenix"];
+    const int PointerLyricOff = 0, FirstPointerLyricShape = 1;
 
     Border? _openLookTiles;
+    readonly Spring _lookScroll = new(0, 260, 30);
+    readonly Spring _updateNotesScroll = new(0, 260, 30);
 
     void SettingsRow_Click(object sender, RoutedEventArgs e) => ShowPanelAndCheckUpdate(Panel.Settings);
 
@@ -26,7 +28,11 @@ public partial class MainWindow
 
     void UpdateBack_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Settings);
 
-    void LookRow_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Look);
+    void LookRow_Click(object sender, RoutedEventArgs e)
+    {
+        _lookScroll.Snap(0);
+        ShowPanel(Panel.Look);
+    }
 
     void SettingsBack_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Menu);
 
@@ -52,26 +58,34 @@ public partial class MainWindow
         TrackLyrics();
     }
 
-    void SourcesRow_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Sources);
+    void LyricsRow_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Lyrics);
 
-    void SourcesBack_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Settings);
+    void LyricsBack_Click(object sender, RoutedEventArgs e) => ShowPanel(Panel.Settings);
 
     void Source_Click(object sender, RoutedEventArgs e)
     {
-        var picked = (LyricSource)(1 << SourceRows.Children.IndexOf((UIElement)sender) - FirstSourceRow);
+        var picked = (LyricSource)(1 << SourceChips.Children.IndexOf((UIElement)sender));
         LyricSource left = Settings.LyricSources ^ picked;
-        if (left == 0) return;
-
-        Settings.LyricSources = left;
+        if (left != 0)
+        {
+            Settings.LyricSources = left;
+            TrackLyrics();
+        }
         UpdateSwitches(true);
-        TrackLyrics();
     }
 
     void LyricEffects_Click(object sender, RoutedEventArgs e)
     {
         Settings.LyricEffects = !Settings.LyricEffects;
         UpdateSwitches(true);
-        _playerLines = [];
+        RebuildPlayerLyrics();
+    }
+
+    void LyricParting_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.LyricParting = !Settings.LyricParting;
+        UpdateSwitches(true);
+        StirLyrics();
     }
 
     void Rim_Click(object sender, RoutedEventArgs e)
@@ -109,8 +123,11 @@ public partial class MainWindow
 
     void UpdateSwitches(bool animate)
     {
+        LyricsState.Text = Settings.Lyrics ? "Вкл" : "Выкл";
         LyricsSwitch.Set(Settings.Lyrics, animate);
         LyricEffectsSwitch.Set(Settings.LyricEffects, animate);
+        PointerLyricSegments.Set(Settings.PointerLyric ? FirstPointerLyricShape + (int)Settings.PointerLyricShape : PointerLyricOff, animate);
+        LyricPartingSwitch.Set(Settings.LyricParting, animate);
         RimSwitch.Set(Settings.Rim, animate);
         AppVolumeSwitch.Set(Settings.AppVolume, animate);
         AppSpectrumSwitch.Set(Settings.AppSpectrum, animate);
@@ -119,10 +136,8 @@ public partial class MainWindow
         FullscreenSwitch.Set(Settings.HideFullscreen, animate);
         AutostartSwitch.Set(Autostart.Enabled, animate);
 
-        Toggle[] sources = [LrclibSwitch, DeezerSwitch, NetEaseSwitch, QqMusicSwitch, KugouSwitch, PaxsenixSwitch];
-        string[] chosen = SourceNames.Where((_, i) => Settings.LyricSources.HasFlag((LyricSource)(1 << i))).ToArray();
-        for (int i = 0; i < sources.Length; i++) sources[i].Set(Settings.LyricSources.HasFlag((LyricSource)(1 << i)), animate);
-        SourcesText.Text = chosen.Length == sources.Length ? "Все" : chosen.Length == 1 ? chosen[0] : $"{chosen.Length} из {sources.Length}";
+        for (int i = 0; i < SourceChips.Children.Count; i++)
+            ((ToggleButton)SourceChips.Children[i]).IsChecked = Settings.LyricSources.HasFlag((LyricSource)(1 << i));
     }
 
     async void Update_Click(object sender, RoutedEventArgs e)
@@ -149,7 +164,9 @@ public partial class MainWindow
             _ => found ? "вместо " + Updater.CurrentVersion : "",
         };
         UpdateNotes.SetVisible(found && _updater.Notes.Length > 0);
-        UpdateNotesText.Text = string.Join('\n', _updater.Notes.Select(note => "·  " + note));
+        string notes = string.Join('\n', _updater.Notes.Select(note => "·  " + note));
+        if (UpdateNotesText.Text != notes) _updateNotesScroll.Snap(0);
+        UpdateNotesText.Text = notes;
 
         UpdateButton.SetVisible(!loading);
         UpdateLoad.SetVisible(loading);
@@ -186,6 +203,22 @@ public partial class MainWindow
 
         UpdatePage.Height = height;
         if (_view == View.Update) UpdateTargets();
+    }
+
+    double UpdateNotesOverflow => Math.Max(UpdateNotesText.ActualHeight - UpdateNotesBox.ActualHeight, 0);
+
+    void ScrollUpdateNotes(int notches)
+    {
+        _updateNotesScroll.Target = Math.Clamp(_updateNotesScroll.Target + notches * UpdateNotesWheelStep, 0, UpdateNotesOverflow);
+        StartShapeLoop();
+    }
+
+    void ApplyUpdateNotesScroll()
+    {
+        double scrolled = Math.Min(_updateNotesScroll.Value, UpdateNotesOverflow);
+        UpdateNotesMove.Y = -scrolled;
+        UpdateNotesEdgeTop.Color = EdgeFade(scrolled);
+        UpdateNotesEdgeBottom.Color = EdgeFade(UpdateNotesOverflow - scrolled);
     }
 
     void SizeSlider_Changed(object? sender, EventArgs e) => SetScale((int)SizeSlider.Value);
@@ -282,10 +315,52 @@ public partial class MainWindow
         chevron.RenderTransform.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(open ? 90 : 0, Ms(240)) { EasingFunction = ease });
     }
 
-    void LookTiles_SizeChanged(object sender, SizeChangedEventArgs e)
+    double LookOverflow => Math.Max(LookRows.ActualHeight + LookRows.Margin.Top + LookRows.Margin.Bottom - LookView.Height, 0);
+
+    void LookRows_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        LookView.Height = LookHeight + BackdropTiles.ActualHeight + LyricChangeTiles.ActualHeight + HoverTiles.ActualHeight;
-        if (_view == View.Look) UpdateTargets();
+        double reveal = _openLookTiles == null ? 0
+            : _openLookTiles.TranslatePoint(new Point(0, _openLookTiles.ActualHeight), LookRows).Y + LookRows.Margin.Top + LookRows.Margin.Bottom - LookView.Height;
+        _lookScroll.Target = Math.Clamp(Math.Max(_lookScroll.Target, reveal), 0, LookOverflow);
+        StartShapeLoop();
+    }
+
+    void ScrollLook(int notches)
+    {
+        _lookScroll.Target = Math.Clamp(_lookScroll.Target + notches * LookWheelStep, 0, LookOverflow);
+        StartShapeLoop();
+    }
+
+    void ShrinkLookEdges(double scrolled)
+    {
+        double top = Math.Clamp(scrolled / LookEdgeZone, 0, 1), bottom = Math.Clamp((LookOverflow - scrolled) / LookEdgeZone, 0, 1);
+        foreach (FrameworkElement row in LookRows.Children)
+        {
+            double middle = VisualTreeHelper.GetOffset(row).Y + LookRows.Margin.Top + row.ActualHeight / 2 - scrolled;
+            double fromTop = Math.Clamp(middle / LookEdgeZone, 0, 1), fromBottom = Math.Clamp((LookView.Height - middle) / LookEdgeZone, 0, 1);
+            double shrink = Math.Max(top * Smooth(1 - fromTop), bottom * Smooth(1 - fromBottom));
+
+            if (row.RenderTransform is not ScaleTransform size)
+            {
+                row.RenderTransform = size = new ScaleTransform();
+                row.RenderTransformOrigin = new Point(0.5, 0.5);
+            }
+            size.ScaleX = size.ScaleY = 1 - (1 - LookEdgeScale) * shrink;
+        }
+    }
+
+    static double Smooth(double t) => t * t * (3 - 2 * t);
+
+    void ApplyLookScroll()
+    {
+        double scrolled = _lookScroll.Value;
+        LookEdgeTop.Color = EdgeFade(scrolled);
+        LookEdgeBottom.Color = EdgeFade(LookOverflow - scrolled);
+        if (LookView.IsVisible) ShrinkLookEdges(scrolled);
+        if (LookMove.Y == -scrolled) return;
+
+        LookMove.Y = -scrolled;
+        if (_view == View.Look) LookRows.FollowPointer();
     }
 
     void Accent_Click(object sender, RoutedEventArgs e)

@@ -21,6 +21,7 @@ sealed class Updater
     const int CleanUpAttempts = 10;
     static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(30);
     static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(15);
+    static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(30);
     static readonly TimeSpan CleanUpRetry = TimeSpan.FromSeconds(1);
     static readonly HttpClient Http;
 
@@ -110,19 +111,21 @@ sealed class Updater
 
     async Task DownloadAsync()
     {
-        using HttpResponseMessage response = await Http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+        using var stalled = new CancellationTokenSource(StallTimeout);
+        using HttpResponseMessage response = await Http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead, stalled.Token);
         response.EnsureSuccessStatusCode();
         long total = response.Content.Headers.ContentLength ?? 0, done = 0;
         if (total > 0) TotalBytes = total;
 
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await using (Stream from = await response.Content.ReadAsStreamAsync())
+        await using (Stream from = await response.Content.ReadAsStreamAsync(stalled.Token))
         await using (var to = new FileStream(DownloadPath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, true))
         {
             var buffer = new byte[BufferSize];
             int read;
-            while ((read = await from.ReadAsync(buffer)) > 0)
+            while ((read = await from.ReadAsync(buffer, stalled.Token)) > 0)
             {
+                stalled.CancelAfter(StallTimeout);
                 await to.WriteAsync(buffer.AsMemory(0, read));
                 sha.AppendData(buffer, 0, read);
                 done += read;

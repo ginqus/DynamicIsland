@@ -19,7 +19,7 @@ public partial class MainWindow
     readonly FrameLoop _seekLoop;
     bool _scrubbing;
     double _scrubFraction, _scrubHeldUntil;
-    (int At, int Total) _seekLabel = (NoSeconds, NoSeconds);
+    (int At, int Left) _seekLabel = (NoSeconds, NoSeconds);
     LyricsService.Line[] _seekLinesFrom = [];
     TimeSpan _seekLinesSpan;
     bool _seekLined;
@@ -58,7 +58,7 @@ public partial class MainWindow
         AdvancePlayerLyrics(now, dt);
 
         TimeSpan at = known ? duration * shown : _media.Position;
-        var label = counted ? ((int)at.TotalSeconds, known ? (int)duration.TotalSeconds : NoSeconds) : (NoSeconds, NoSeconds);
+        var label = counted ? ((int)at.TotalSeconds, known ? (int)(duration - at).TotalSeconds : NoSeconds) : (NoSeconds, NoSeconds);
         if (label == _seekLabel) return true;
 
         _seekLabel = label;

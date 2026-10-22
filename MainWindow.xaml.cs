@@ -13,9 +13,9 @@ namespace DynamicIsland;
 
 public partial class MainWindow : Window
 {
-    enum View { Idle, Media, Timer, Record, Volume, Charge, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, RecordBig, RecordSet, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Sources, Loading }
+    enum View { Idle, Media, Timer, Record, Volume, Charge, Headset, Focus, Toast, Notice, MediaBig, IdleBig, TimerBig, TimerSet, RecordBig, RecordSet, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Lyrics, Loading }
 
-    enum Panel { None, Player, Timer, TimerSet, Record, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Sources }
+    enum Panel { None, Player, Timer, TimerSet, Record, Menu, Settings, Look, Shelf, Weather, Place, Qr, Update, Lyrics }
 
     readonly record struct PillShape(double Width, double Height, double Radius);
 
@@ -27,6 +27,7 @@ public partial class MainWindow : Window
         [View.Record] = new(132, 34, 17),
         [View.Volume] = new(250, 34, 17),
         [View.Charge] = new(230, 34, 17),
+        [View.Headset] = new(320, 64, 29),
         [View.Focus] = new(236, 34, 17),
         [View.Toast] = new(340, 68, 30),
         [View.Notice] = new(320, 64, 29),
@@ -37,14 +38,14 @@ public partial class MainWindow : Window
         [View.RecordBig] = new(340, 92, 40),
         [View.RecordSet] = new(320, 92, 40),
         [View.Menu] = new(300, 368, 34),
-        [View.Settings] = new(320, 494, 34),
+        [View.Settings] = new(320, 414, 34),
         [View.Look] = new(352, LookHeight, 34),
         [View.Shelf] = new(380, 136, 34),
         [View.Weather] = new(340, 190, 34),
         [View.Place] = new(320, 200, 34),
         [View.Qr] = new(320, 104, 34),
         [View.Update] = new(320, 150, 34),
-        [View.Sources] = new(320, 294, 34),
+        [View.Lyrics] = new(352, 312, 34),
         [View.Loading] = new(118, 34, 17),
     };
 
@@ -64,7 +65,7 @@ public partial class MainWindow : Window
 
     static readonly View[] MenuPages = [View.Settings, View.Look, View.TimerSet, View.TimerBig, View.RecordSet, View.RecordBig, View.Shelf, View.Weather, View.Qr];
 
-    static readonly View[] SettingsPages = [View.Update, View.Sources];
+    static readonly View[] SettingsPages = [View.Update, View.Lyrics];
 
     static readonly View[] WeatherPages = [View.Place];
 
@@ -91,6 +92,7 @@ public partial class MainWindow : Window
     readonly DelayedAction _transientTimeout, _collapseTimeout, _awayTimeout;
     readonly View? _forcedView;
     readonly double _forcedTimerSeconds;
+    readonly int _forcedHeadsetCharge;
 
     View _view = View.Idle;
     View? _transientView;
@@ -119,6 +121,7 @@ public partial class MainWindow : Window
             [View.Record] = RecordView,
             [View.Volume] = VolumeView,
             [View.Charge] = ChargeView,
+            [View.Headset] = HeadsetView,
             [View.Focus] = FocusView,
             [View.Toast] = ToastView,
             [View.Notice] = NoticeView,
@@ -136,14 +139,14 @@ public partial class MainWindow : Window
             [View.Place] = PlaceView,
             [View.Qr] = QrView,
             [View.Update] = UpdatePage,
-            [View.Sources] = SourcesView,
+            [View.Lyrics] = LyricsPage,
             [View.Loading] = LoadingView,
         };
         _spotSprings = [_coverLeft, _coverTop, _coverSize, _barsRight, _barsCenterY, _barsWidth, _barsHeight, _barsOpen];
         _springs =
         [
             _width, _height, _radius, _scale, _offsetY, _userScale, _topGap, _bubbleSplit, _bubbleScale, _bubbleRecord, _bubbleTimer, _bubbleShelf, _shelfBubbleWidth,
-            _shelfScroll, _volumeOvershoot, _leanX, _coverScale, _coverSnapX, _coverSnapY, _lyricSnapX, _lyricSnapY, .. _spotSprings,
+            _shelfScroll, _lookScroll, _updateNotesScroll, _volumeOvershoot, _leanX, _coverScale, _coverSnapX, _coverSnapY, _lyricSnapX, _lyricSnapY, .. _spotSprings,
         ];
         _timerTint = new SolidColorBrush(_orange.Color);
         _recordTint = new SolidColorBrush(_red.Color);
@@ -151,11 +154,13 @@ public partial class MainWindow : Window
 
         _forcedView = Enum.TryParse(Argument("--view"), true, out View forced) ? forced : null;
         _forcedTimerSeconds = double.TryParse(Argument("--timer"), NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds) ? seconds : 0;
+        _forcedHeadsetCharge = int.TryParse(Argument("--headset"), out int charge) ? Math.Clamp(charge, 0, 100) : Headset.Unknown;
 
         _shapeLoop = new FrameLoop(AdvanceShape);
         _glass = new Glass(this);
         _eqLoop = new FrameLoop(AdvanceEq, EqFrameSeconds);
         _seekLoop = new FrameLoop(AdvanceSeek);
+        _partLoop = new FrameLoop(AdvanceLyricParting);
         _transientTimeout = new DelayedAction(EndTransient);
         _collapseTimeout = new DelayedAction(Collapse);
         _awayTimeout = new DelayedAction(ReturnFromAway);
@@ -181,7 +186,7 @@ public partial class MainWindow : Window
         ApplyTimerTint();
         ApplyRecordTint();
         TuneDragSprings(false);
-        _ticker.Tick += (_, _) => TickSafely();
+        _ticker.Tick += (_, _) => OnTick();
         Loaded += OnLoaded;
         Deactivated += OnDeactivated;
     }
@@ -277,6 +282,9 @@ public partial class MainWindow : Window
         _ticker.Start();
         if (_forcedTimerSeconds > 0) StartTimer(TimeSpan.FromSeconds(_forcedTimerSeconds));
         if (_forcedView == View.Update) _ = _updater.CheckAsync();
+        if (_forcedHeadsetCharge >= 0)
+            ShowHeadset("AirPods Pro", Enum.TryParse(Argument("--gadget"), true, out Gadget.Model model) ? model : Gadget.Model.Earbuds,
+                _forcedHeadsetCharge, _forcedHeadsetCharge <= HeadsetLowPercent);
 
         try { await _media.StartAsync(); }
         catch (Exception ex) { App.Log(ex); }
@@ -305,6 +313,7 @@ public partial class MainWindow : Window
     {
         _ticker.Stop();
         _alarm.Stop();
+        _pointerLyric?.ShowLine("", 0, 0);
         _glass.Hide();
         var fade = new DoubleAnimation(0, Ms(220));
         fade.Completed += (_, _) => Application.Current.Shutdown();
@@ -313,11 +322,11 @@ public partial class MainWindow : Window
         StartShapeLoop();
     }
 
-    void TickSafely()
+    static void Safely(Action step)
     {
         try
         {
-            OnTick();
+            step();
         }
         catch (Exception ex)
         {
@@ -328,25 +337,25 @@ public partial class MainWindow : Window
     void OnTick()
     {
         _ticks++;
-        PollVolume();
-        if (_ticks % HeadsetReadTicks == 1) ReadHeadset(_audio.Device);
-        UpdateLyric();
-        UpdateTimer();
-        UpdateRecord();
+        Safely(PollVolume);
+        if (_ticks % HeadsetReadTicks == 1) Safely(() => ReadHeadset(_audio.Device));
+        Safely(() => UpdateLyric());
+        Safely(UpdatePointerLyric);
+        Safely(UpdateTimer);
+        Safely(UpdateRecord);
         if (_ticks % FullscreenCheckTicks == 0)
         {
-            CheckFullscreen();
-            PollDoNotDisturb();
+            Safely(CheckFullscreen);
+            Safely(PollDoNotDisturb);
         }
         if (_ticks % ClockUpdateTicks == 0)
         {
-            UpdateClock();
-            PollPower();
+            Safely(UpdateClock);
+            Safely(PollPower);
             _ = _weather.RefreshAsync();
-            Native.KeepOnTop(_hwnd);
-            _glass.Place();
+            Safely(StayOnTop);
             if (_media.IsPlaying) _lastPlayedAt = DateTime.UtcNow;
-            UpdateView();
+            Safely(UpdateView);
         }
     }
 
@@ -358,7 +367,7 @@ public partial class MainWindow : Window
             Panel.Settings => View.Settings,
             Panel.Look => View.Look,
             Panel.Update => View.Update,
-            Panel.Sources => View.Sources,
+            Panel.Lyrics => View.Lyrics,
             Panel.Shelf => View.Shelf,
             Panel.Weather => View.Weather,
             Panel.Place => View.Place,
